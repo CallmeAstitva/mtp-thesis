@@ -1,0 +1,48 @@
+%==============================================================
+%  MTP Thesis  --  IIT Delhi, Dept. of Computer Science & Engineering
+%  Main file. Compile with pdfLaTeX (recommended on Overleaf).
+%  Build order: pdflatex -> bibtex -> pdflatex -> pdflatex
+%==============================================================
+\documentclass[12pt,a4paper,oneside]{book}
+
+\input{preamble}
+
+%--------------------------------------------------------------
+%  Author / title metadata  --  EDIT THESE
+%--------------------------------------------------------------
+\newcommand{\thesistitle}{Recommendation Systems for IndiaMART}
+\newcommand{\thesisauthor}{Astitva}          % TODO: full name as on records
+\newcommand{\thesisentryno}{XXXXCSXXXXX}      % TODO: entry number
+\newcommand{\thesisguide}{Prof.\ Rahul Garg}  % TODO: confirm supervisor
+\newcommand{\thesisdept}{Department of Computer Science and Engineering}
+\newcommand{\thesisdate}{\today}              % TODO: submission date
+
+\begin{document}
+
+\frontmatter
+
+\input{chapters/00_titlepage}
+\input{chapters/00_acknowledgements}
+\input{chapters/00_abstract}
+\input{chapters/00_abbreviations}
+
+\tableofcontents
+\listoffigures
+\listoftables
+
+\mainmatter
+
+% Chapters are included below. The list is provisional and will be
+% finalised once the source decks have been ingested. Keep each
+% chapter in its own file so sections can be slotted in independently.
+\input{chapters/01_introduction}
+% \input{chapters/02_xxx}
+% \input{chapters/03_xxx}
+% ...
+\input{chapters/99_conclusion}
+
+\backmatter
+\bibliographystyle{plain}
+\bibliography{references}
+
+\end{document}
