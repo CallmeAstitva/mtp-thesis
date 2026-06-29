@@ -333,11 +333,57 @@ quantitative error figures from the experiments are reported where available.
   \end{tabular}
 \end{table}
 
-\noindent The progression across the three methods tells a clean story. ALS,
+\noindent The progression across the three methods tells a clear story. ALS,
 the conventional choice, breaks on the non-negativity requirement intrinsic to
 a probability matrix. NMF restores non-negativity but still tries to fit the
 structural zeros of a $10^{-4}$-dense matrix. Binary-weighted NMF addresses
-both issues at once, and is the method we carry forward. Together with the
-factorized $K$-step identity of \eqref{eq:factored-power}, it yields a
-$K$-step Markov-chain recommender that is both faithful to the probabilistic
-semantics of the data and feasible at IndiaMART scale.
+both issues at once and drives the error on the observed entries almost to
+zero, which is why it was adopted as the working method at the end of the
+mid-term stage. The closer evaluation carried out subsequently, however,
+revealed that this near-zero error figure conceals a serious failure mode. The
+next section examines it.
+
+%--------------------------------------------------------------
+\section{Limitation of Weighted NMF}
+\label{sec:wnmf-limit}
+
+The very mechanism that makes binary-weighted NMF attractive --- fitting only
+the observed entries --- is also the source of its weakness. Recall from
+\eqref{eq:wnmf-obj} that with a binary weight matrix the loss is accumulated
+\emph{only} over positions where $W^{\mathrm{wt}}_{ij}=1$. The multiplicative
+updates of \eqref{eq:wnmf-update} therefore move $U$ and $V$ so as to improve
+the reconstruction of those observed positions and nothing else. Likewise, the
+absolute (and normalised) error is measured only against the observed entries
+of the original matrix. The reconstructed values at the \emph{unobserved}
+positions --- those with $W^{\mathrm{wt}}_{ij}=0$ --- enter neither the loss nor
+the error metric. They are produced as an uncontrolled by-product of the
+factors and are never monitored during training.
+
+This is precisely where the method fails. Because nothing in the objective
+constrains the unobserved entries, there is no force keeping them small or
+well-behaved. As the factors are driven to fit the observed entries, some of
+the unconstrained entries in the reconstruction $U V^{\top}$ drift to
+unusually large values. Two consequences follow:
+
+\begin{itemize}
+  \item \textbf{The error metric is blind to the problem.} Since error is
+        computed only on observed entries, a model can report near-zero error
+        while simultaneously placing wildly inflated values at unobserved
+        positions. The optimistic figure of Section~\ref{sec:mf-results} is, in
+        this light, partly an artefact of \emph{what} is being measured.
+  \item \textbf{Inflated entries dominate the Markov chain.} In the $K$-step
+        recommender these spuriously large reconstructed values behave as if
+        they were high transition probabilities. Propagated through
+        $M^{K}\approx U\,W^{\,K-1}\,V^{\top}$, they dominate the chain's
+        transitions, so that a handful of products surface excessively in the
+        recommendations regardless of the query --- crowding out the genuinely
+        relevant items.
+\end{itemize}
+
+In short, binary-weighted NMF optimises a quantity (observed-entry
+reconstruction) that is not aligned with the quantity that actually matters for
+recommendation (the behaviour of the \emph{full} reconstructed matrix under
+repeated multiplication). Controlling the unobserved entries --- so that the
+reconstruction remains a well-behaved transition operator everywhere, not only
+where data was seen --- is the open problem that this work carries into the
+next stage.
