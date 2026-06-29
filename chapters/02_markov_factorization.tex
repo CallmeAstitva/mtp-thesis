@@ -1,0 +1,343 @@
+%==============================================================
+%  Chapter 2 -- Scalable K-Step Markov-Chain Recommendation
+%                via Matrix Factorization
+%  Source: Semester-1 mid-term deck (Matrix Factorization).
+%==============================================================
+\chapter{Scalable \texorpdfstring{$K$}{K}-Step Markov-Chain Recommendation via Matrix Factorization}
+\label{ch:markov-factorization}
+
+This chapter develops the first line of work undertaken for the IndiaMART
+recommendation problem: modelling product-to-product navigation as a Markov
+chain and using its $K$-step transition behaviour to generate
+recommendations. The central difficulty is one of scale. The transition
+matrix is of the order of tens of millions of products on a side, and the
+naive computation of its $K$-step powers is infeasible both in time and in
+memory. We motivate a matrix-factorization reformulation that expresses the
+$K$-step transition matrix in terms of two thin factors, analyse the memory
+it saves, and then examine three candidate factorization schemes ---
+Alternating Least Squares (ALS), Non-negative Matrix Factorization (NMF), and
+Weighted NMF --- comparing them in the light of the non-negativity and
+sparsity structure that the problem imposes.
+
+%--------------------------------------------------------------
+\section{Problem Statement}
+\label{sec:mf-problem}
+
+The starting point is a product-to-product association matrix
+$M \in \mathbb{R}^{N \times N}$, where each entry $M_{ij}$ encodes the
+strength of the transition from product $i$ to product $j$ --- in our setting,
+the (empirical) probability that a user who interacts with product $i$ next
+interacts with product $j$. The goal is to build a \emph{$K$-step Markov-chain
+recommender}: rather than recommending only the immediate successors of a
+product, we follow the chain forward $K$ steps so that recommendations capture
+multi-hop navigation patterns across the catalogue.
+
+Two structural properties of $M$ dominate the design:
+
+\begin{itemize}
+  \item \textbf{Scale.} The matrix is approximately
+        $2.3~\text{crore} \times 2.3~\text{crore}$, i.e.\ roughly
+        $N \approx 2.3 \times 10^{7}$ on each axis.
+  \item \textbf{Sparsity.} The density is approximately $10^{-4}$; the
+        overwhelming majority of product pairs never co-occur in a session.
+\end{itemize}
+
+The combination is what makes the problem hard. While $M$ itself is sparse and
+storable, its powers are not: as the chain is advanced through successive
+steps, paths between products proliferate and the density of $M^{k}$ grows
+\emph{exponentially} with $k$. Within a few steps the matrix becomes
+effectively dense, and materialising it would require an amount of memory that
+no commodity machine can provide --- in practice leading to buffer overflow
+and out-of-memory failure. The remainder of the chapter is concerned with
+computing the $K$-step transition behaviour \emph{without} ever forming a
+dense $M^{k}$.
+
+%--------------------------------------------------------------
+\section{Background}
+\label{sec:mf-background}
+
+\subsection{Recommender Systems}
+A recommender system is a data-driven system that surfaces items relevant to a
+user by exploiting patterns and relationships latent in interaction data.
+Broadly, three families are distinguished. \emph{Content-based} methods
+recommend items similar to those a user has already engaged with, using item
+attributes. \emph{Collaborative filtering} methods rely instead on the
+behaviour of the user population, recommending items favoured by users with
+similar histories. \emph{Hybrid} approaches combine the two to offset their
+individual weaknesses. Recommender systems are now ubiquitous in e-commerce,
+streaming, and social platforms. They are nonetheless beset by recurring
+challenges: the \emph{cold-start} problem for new users or items, \emph{data
+sparsity} when interactions are few relative to the catalogue, and
+\emph{scalability} as catalogues grow to the scale considered here. The work
+in this thesis sits squarely against the last two of these.
+
+\subsection{Markov Chains and \texorpdfstring{$K$}{K}-Step Transitions}
+\label{sec:markov}
+A Markov chain is a stochastic model of a sequence of events in which the
+probability of the next event depends only on the present state and not on the
+history that preceded it (the \emph{memoryless}, or first-order Markov,
+property). The dynamics are captured by a transition matrix $M$, whose entry
+$M_{ij}$ gives the probability of moving from state $i$ to state $j$ in a
+single step.
+
+The key fact we exploit is how multi-step transitions compose. The
+probability of moving from state $i$ to state $j$ in exactly $k$ steps is the
+$(i,j)$ entry of the $k$-th matrix power:
+\begin{equation}
+  \label{eq:kstep}
+  \bigl[M^{k}\bigr]_{ij}
+    \;=\; \Pr\!\left(\text{state } j \text{ after } k \text{ steps}
+                     \mid \text{state } i \text{ now}\right).
+\end{equation}
+Equation~\eqref{eq:kstep} is exactly the object a $K$-step recommender needs:
+ranking the row $\bigl[M^{K}\bigr]_{i,\,\cdot}$ yields the products most likely
+to be reached from product $i$ within $K$ steps. The computational obstacle of
+Section~\ref{sec:mf-problem} is now precise --- we must read off rows of
+$M^{K}$ without forming $M^{K}$ explicitly.
+
+%--------------------------------------------------------------
+\section{Proposed Solution: Factorized \texorpdfstring{$K$}{K}-Step Powers}
+\label{sec:mf-solution}
+
+Direct iteration of a $2.3\times10^{7}$ square matrix to the $K$-th power is
+impossible at this scale. Our proposal is to replace $M$ by a low-rank
+factorization and to push the matrix power onto the (tiny) factors.
+
+Suppose $M$ admits a rank-$r$ factorization
+\begin{equation}
+  \label{eq:factorize}
+  M \;\approx\; U V^{\top},
+  \qquad U \in \mathbb{R}^{N \times r},\;\; V \in \mathbb{R}^{N \times r},
+\end{equation}
+with $r \ll N$ (in our experiments $r$ is of the order of $100$). The two
+factors $U$ and $V$ are thin: their storage is linear in $N$ rather than
+quadratic. The power of this representation is that the $K$-step matrix can be
+expressed entirely through a small $r \times r$ core. Substituting
+\eqref{eq:factorize} and using associativity,
+\begin{align}
+  M^{k}
+    &\approx \underbrace{(U V^{\top})(U V^{\top}) \cdots (U V^{\top})}_{k\ \text{factors}}
+     \nonumber\\[2pt]
+    &= U \,\bigl(V^{\top} U\bigr)^{k-1}\, V^{\top}
+     \;=\; U\, W^{\,k-1}\, V^{\top},
+  \label{eq:factored-power}
+\end{align}
+where we have defined the \emph{core matrix}
+\begin{equation}
+  \label{eq:core}
+  W \;=\; V^{\top} U \;\in\; \mathbb{R}^{r \times r}.
+\end{equation}
+Equation~\eqref{eq:factored-power} is the heart of the approach: the only
+power that must be computed is $W^{\,k-1}$, an $r\times r$ matrix with
+$r \approx 100$, which is trivial. The large factors $U$ and $V$ are touched
+only by the final, lazy left- and right-multiplications, and a single
+recommendation row $\bigl[M^{K}\bigr]_{i,\cdot}
+= U_{i,\cdot}\,W^{\,K-1}\,V^{\top}$ can be evaluated on demand without
+materialising the full $N \times N$ result.
+
+\begin{remark}
+The mid-term presentation wrote the relation compactly as
+$M^{k} = U\,(W^{k})\,V^{\top}$. The exact algebra in
+\eqref{eq:factored-power} gives the exponent $k-1$ rather than $k$, since one
+factor of $V^{\top}U$ is consumed by the outer $U$ and $V^{\top}$. The
+distinction does not affect the memory argument below.
+\end{remark}
+
+\subsection{Memory Analysis}
+\label{sec:mf-memory}
+The saving is best appreciated with the concrete figures of the IndiaMART
+setting. Take $N = 2.3 \times 10^{7}$, rank $r = 100$, step count $K = 6$, and
+double-precision storage at $8$ bytes per entry.
+
+If $M^{k}$ were materialised densely --- which, as noted, it effectively
+becomes after a few steps --- it would occupy
+\begin{equation}
+  N^{2} \times 8
+    = \bigl(2.3\times10^{7}\bigr)^{2}\times 8
+    \;\approx\; 4.232 \times 10^{15}\ \text{bytes},
+\end{equation}
+i.e.\ on the order of petabytes, which is plainly infeasible. In the
+factorized form, by contrast, we store only $U$, $V$, and the core $W$:
+\begin{equation}
+  \underbrace{2\,(N \times r)\times 8}_{U,\,V}
+   + \underbrace{r^{2}\times 8}_{W}
+    \;=\; 2\,(2.3\times10^{7}\times 100)\times 8 + \text{(negligible)}
+    \;\approx\; 36.8\ \text{GB}.
+\end{equation}
+The reduction is from petabytes to tens of gigabytes --- five orders of
+magnitude --- and brings the $K$-step computation within reach of a single
+large-memory machine. Table~\ref{tab:mf-memory} summarises the comparison.
+
+\begin{table}[ht]
+  \centering
+  \caption{Memory footprint of the $K$-step transition computation
+           ($N=2.3\times10^{7}$, $r=100$, double precision).}
+  \label{tab:mf-memory}
+  \begin{tabular}{lll}
+    \toprule
+    Representation & Quantity stored & Memory \\
+    \midrule
+    Dense $M^{k}$            & $N^{2}$ entries          & $\approx 4.232\times10^{15}$ B \\
+    Factorized $U W^{k-1}V^{\top}$ & $2Nr + r^{2}$ entries & $\approx 36.8$ GB \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+%--------------------------------------------------------------
+\section{Factorization Methods}
+\label{sec:mf-methods}
+
+The reformulation of Section~\ref{sec:mf-solution} presumes a factorization
+$M \approx U V^{\top}$. How that factorization is obtained is itself a design
+choice, and three methods were considered: Alternating Least Squares (ALS),
+Non-negative Matrix Factorization (NMF), and Weighted NMF. Because the entries
+of $M$ are transition probabilities, they are non-negative by construction ---
+a property that, as we shall see, decisively favours the non-negative methods.
+
+\subsection{Alternating Least Squares (ALS)}
+\label{sec:als}
+ALS is a classical matrix-factorization technique, widely used in
+collaborative filtering and recommender systems~\cite{HKV08,KBV09}. It
+decomposes a large, sparse matrix into lower-dimensional latent factors by
+minimising the regularised reconstruction error
+\begin{equation}
+  \label{eq:als-obj}
+  \min_{U,\,V}\;
+    \bigl\| M - U V^{\top} \bigr\|_{F}^{2}
+    \;+\; \lambda\bigl(\|U\|_{F}^{2} + \|V\|_{F}^{2}\bigr),
+\end{equation}
+where $\lambda > 0$ is a regularisation weight and $\|\cdot\|_{F}$ the
+Frobenius norm. The objective in \eqref{eq:als-obj} is not jointly convex in
+$(U,V)$, but it \emph{is} convex in each factor with the other held fixed.
+ALS exploits this by alternating: it fixes $V$ and solves a least-squares
+problem for $U$, then fixes $U$ and solves for $V$, repeating until
+convergence. Each subproblem has a closed form,
+\begin{align}
+  \label{eq:als-update}
+  u_{i} &= \bigl(V^{\top}V + \lambda I_{r}\bigr)^{-1} V^{\top} m_{i},
+   &\text{(row $i$ of $U$)} \nonumber\\
+  v_{j} &= \bigl(U^{\top}U + \lambda I_{r}\bigr)^{-1} U^{\top} m_{j},
+   &\text{(row $j$ of $V$)}
+\end{align}
+where $m_{i}$ and $m_{j}$ denote the relevant row/column of $M$ and $I_{r}$ is
+the $r\times r$ identity. ALS is efficient, scalable, parallelises naturally
+across rows, and copes well with sparse data, which is why it is a standard
+first choice for recommendation at scale.
+
+\paragraph{Why ALS does not work here.}
+Despite its appeal, ALS proved unsuitable for this problem. The entries of $M$
+are transition \emph{probabilities} and are therefore non-negative by
+definition; a faithful factorization should respect this. ALS, however, places
+no sign constraint on $U$ or $V$, and the reconstructed $UV^{\top}$ readily
+produces negative entries that have no probabilistic meaning. In the
+experiments conducted, approximately $34\%$ of the reconstructed entries were
+negative, and the normalised reconstruction error was $51.23\%$. Both figures
+are unacceptable for a probability matrix. This observation is what motivates
+moving to non-negativity-constrained factorizations.
+
+\subsection{Non-Negative Matrix Factorization (NMF)}
+\label{sec:nmf}
+NMF decomposes a non-negative matrix $M$ into two lower-dimensional factors
+that are \emph{themselves} constrained to be non-negative,
+$M \approx U V^{\top}$ with $U, V \ge 0$ elementwise. The objective is
+\begin{equation}
+  \label{eq:nmf-obj}
+  \min_{U,\,V \,\ge\, 0}\;
+    \bigl\| M - U V^{\top} \bigr\|_{F}^{2}.
+\end{equation}
+The non-negativity constraint guarantees that the reconstruction
+$U V^{\top}$ is itself non-negative, so every entry remains interpretable as a
+(non-normalised) probability --- precisely the property ALS failed to
+preserve. The standard solver is the multiplicative-update rule of Lee and
+Seung~\cite{LeeSeung01}, which preserves non-negativity automatically at every
+iteration:
+\begin{equation}
+  \label{eq:nmf-update}
+  U \;\leftarrow\; U \;\odot\; \frac{M V}{\,U V^{\top} V\,},
+  \qquad
+  V \;\leftarrow\; V \;\odot\; \frac{M^{\top} U}{\,V U^{\top} U\,},
+\end{equation}
+where $\odot$ denotes the Hadamard (elementwise) product and the division is
+elementwise. Starting from non-negative initial factors, the updates in
+\eqref{eq:nmf-update} keep $U$ and $V$ non-negative throughout and
+monotonically decrease the objective \eqref{eq:nmf-obj}.
+
+\subsection{Weighted NMF (WNMF)}
+\label{sec:wnmf}
+Weighted NMF extends NMF by attaching a weight to each entry of $M$, so that
+different observations contribute with different importance. This is valuable
+when the data contains missing values, noise, or entries of varying
+confidence --- all of which characterise an extremely sparse association
+matrix. Let $W^{\mathrm{wt}} \in \mathbb{R}^{N\times N}_{\ge 0}$ be the weight
+matrix. The objective becomes
+\begin{equation}
+  \label{eq:wnmf-obj}
+  \min_{U,\,V \,\ge\, 0}\;
+    \bigl\| W^{\mathrm{wt}} \odot \bigl(M - U V^{\top}\bigr) \bigr\|_{F}^{2},
+\end{equation}
+and the corresponding multiplicative updates are
+\begin{equation}
+  \label{eq:wnmf-update}
+  U \;\leftarrow\; U \;\odot\;
+    \frac{\bigl(W^{\mathrm{wt}}\odot M\bigr) V}
+         {\bigl(W^{\mathrm{wt}}\odot (U V^{\top})\bigr) V},
+  \qquad
+  V \;\leftarrow\; V \;\odot\;
+    \frac{\bigl(W^{\mathrm{wt}}\odot M\bigr)^{\top} U}
+         {\bigl(W^{\mathrm{wt}}\odot (U V^{\top})\bigr)^{\top} U}.
+\end{equation}
+Setting $W^{\mathrm{wt}} = \mathbf{1}$ (all weights equal) recovers ordinary
+NMF; the freedom lies in choosing $W^{\mathrm{wt}}$ to reflect the structure of
+the data.
+
+%--------------------------------------------------------------
+\section{Results and Discussion}
+\label{sec:mf-results}
+
+The decisive design lever turned out to be the choice of weights in WNMF. By
+taking \emph{binary} weights --- $W^{\mathrm{wt}}_{ij} = 1$ where $M_{ij}$ is
+observed and $0$ where it is missing --- the factorization is asked to fit only
+the entries that actually carry information, and the vast field of structural
+zeros in the sparse matrix is prevented from dominating the loss. This removes
+the undesired influence of missing elements on the factors. Under binary
+weighting the reconstruction error on the observed entries dropped almost to
+zero, a dramatic improvement over both ALS (Section~\ref{sec:als}) and
+unweighted NMF.
+
+% FIGURE PLACEHOLDER: user to supply the error-comparison plot (ALS vs NMF
+% vs binary-weighted WNMF) into figures/.
+% \begin{figure}[ht]
+%   \centering
+%   \includegraphics[width=0.8\textwidth]{figures/mf_error_comparison.png}
+%   \caption{Normalised reconstruction error across the three factorization
+%            methods.}
+%   \label{fig:mf-error}
+% \end{figure}
+
+Table~\ref{tab:mf-comparison} collects the comparison qualitatively; the
+quantitative error figures from the experiments are reported where available.
+
+\begin{table}[ht]
+  \centering
+  \caption{Comparison of the three factorization methods for the non-negative,
+           highly sparse transition matrix.}
+  \label{tab:mf-comparison}
+  \begin{tabular}{lccc}
+    \toprule
+    Method & Non-negativity & Handles missing entries & Reconstruction error \\
+    \midrule
+    ALS              & No (\,$\approx34\%$ negative\,) & No   & $51.23\%$ \\
+    NMF              & Yes                              & No   & --- \\
+    WNMF (binary $W$) & Yes                             & Yes  & $\approx 0$ \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\noindent The progression across the three methods tells a clean story. ALS,
+the conventional choice, breaks on the non-negativity requirement intrinsic to
+a probability matrix. NMF restores non-negativity but still tries to fit the
+structural zeros of a $10^{-4}$-dense matrix. Binary-weighted NMF addresses
+both issues at once, and is the method we carry forward. Together with the
+factorized $K$-step identity of \eqref{eq:factored-power}, it yields a
+$K$-step Markov-chain recommender that is both faithful to the probabilistic
+semantics of the data and feasible at IndiaMART scale.
