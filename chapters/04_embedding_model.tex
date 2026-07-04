@@ -24,12 +24,15 @@ objective), the extensions made during development (trainable centroids and a
 flat alternative), the implementation as actually built, and a sequence of
 controlled training experiments together with what they reveal.
 
-A caveat frames the entire chapter. All reported results are
-\emph{training-objective} results --- the weighted negative log-likelihood
-being optimised. Offline recommendation-quality evaluation (click-through
-proxies) is conducted separately and is out of scope here; every conclusion
-below is therefore a statement about optimisation behaviour, not about
-retrieval quality.
+A note on scope frames the chapter. The experiments of
+Section~\ref{sec:emb-experiments} and the findings drawn from them
+(Section~\ref{sec:emb-findings}) are \emph{training-objective} results --- the
+weighted negative log-likelihood being optimised --- and their conclusions are
+statements about optimisation behaviour. Whether a lower training loss actually
+yields better recommendations is a separate question, taken up in
+Section~\ref{sec:emb-ctr}, which reports offline click-through evaluation. As we
+shall see, the two do not always agree, and in two instances they point in
+opposite directions.
 
 %--------------------------------------------------------------
 \section{Problem and Setup}
@@ -470,6 +473,11 @@ required to confirm whether any of them translates into better retrieval.
         is small enough for a full softmax to be computed directly.
 \end{enumerate}
 
+All three are statements about the training objective. Two of them --- the
+lower loss of random initialisation and the superiority of the flat objective
+--- turn out \emph{not} to carry over to recommendation quality, as the
+click-through evaluation of Section~\ref{sec:emb-ctr} shows.
+
 For reference, Table~\ref{tab:emb-hparams} lists the hyperparameters used across
 the experiments. All runs are seeded ($42$) for embedding initialisation and
 microbatch shuffling; random embeddings are generated deterministically from
@@ -501,3 +509,254 @@ epoch end for exact resume; and per-epoch summaries are written to a
     \bottomrule
   \end{tabular}
 \end{table}
+
+%--------------------------------------------------------------
+\section{Recommendation-Quality Evaluation}
+\label{sec:emb-ctr}
+
+The findings above concern the training objective. We now measure what the
+embeddings actually deliver as recommendations, using offline click-through
+rate (CTR) on the four held-out weeks of June~2025 (training window
+1~July~2024--31~May~2025). CTR is reported on two surfaces: \emph{IMOB}, the
+IndiaMART mobile app, and \emph{IM}, the IndiaMART web surface. At serving time
+the learned embeddings are $L_2$-normalised, indexed with FAISS HNSW, and
+queried for top-$K$ neighbours, after which a geographic filter is applied
+(retaining products within roughly $50$~km for Tier-1 and $250$~km for Tier-2
+cities).
+
+\subsection{Baselines}
+\label{sec:emb-baselines}
+Three baselines are used. The \emph{Frequency-Based Model} (FBM) is the
+incumbent frequency/co-occurrence recommender: an $n\times n$ matrix over
+products in which entry $m_{ij}$ is the number of observed transitions from
+product $i$ to product $j$, with each row normalised to sum to one.
+\emph{Backfilling} is a coverage mechanism layered on top --- for a product with
+fewer than $k$ recommendations, or with recommendation scores below a
+threshold, the remaining slots are filled with IndiaMART's pre-existing
+recommendations. FBM is therefore reported both \emph{without} and \emph{with}
+backfilling, the latter being the strongest baseline. The third baseline, the
+\emph{Content-Baseline Model}, is the text-metadata cold-start embeddings served
+directly, with no interaction training --- it isolates how much the skip-gram
+training over interactions adds on top of the initial text geometry.
+
+\subsection{Main Results}
+\label{sec:emb-main-ctr}
+Table~\ref{tab:emb-ctr-main} compares the baselines against the hierarchical
+cosine-softmax model (frozen centroids, text initialisation) at epochs~1, 5,
+and~10, on the mobile surface.
+
+\begin{table}[ht]
+  \centering
+  \caption{Offline CTR (\%, IMOB / mobile) on held-out weeks of June~2025:
+           baselines versus the frozen hierarchical softmax model.}
+  \label{tab:emb-ctr-main}
+  \small
+  \begin{tabular}{lcccc}
+    \toprule
+    Model & 01~Jun & 08~Jun & 15~Jun & 22~Jun \\
+    \midrule
+    FBM without backfilling      & $8.12$ & $7.52$ & $7.00$ & $6.58$ \\
+    Content-Baseline (text only) & $4.07$ & $3.83$ & $3.81$ & $3.80$ \\
+    FBM with backfilling         & $\mathbf{10.83}$ & $\mathbf{10.22}$ & $\mathbf{9.96}$ & $\mathbf{9.54}$ \\
+    \midrule
+    Hierarchical softmax, epoch~1  & $5.93$ & $5.67$ & $5.48$ & $5.33$ \\
+    Hierarchical softmax, epoch~5  & $7.22$ & $6.94$ & $6.61$ & $6.34$ \\
+    Hierarchical softmax, epoch~10 & $7.24$ & $6.96$ & $6.61$ & $6.34$ \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+Three observations follow. First, interaction training clearly helps: CTR rises
+from $5.93\%$ at epoch~1 to $7.24\%$ at epoch~10 (week of 1~June), and the
+learned model comfortably beats the content-only baseline ($\approx 4\%$),
+confirming that the skip-gram objective adds real signal over the text geometry.
+Second, the gains saturate quickly --- epochs~5 and~10 are almost
+indistinguishable --- consistent with the training-loss curves. Third, and less
+comfortably, the embedding model does \emph{not} overtake the frequency
+baseline: it trails FBM without backfilling in every week and sits well below
+FBM with backfilling (the $\approx 9.5$--$10.8\%$ incumbent). Learned
+embeddings, on their own, do not yet match the production frequency model.
+
+\subsection{Centroid Variants and Initialisation}
+\label{sec:emb-variants-ctr}
+Tables~\ref{tab:emb-ctr-imob} and~\ref{tab:emb-ctr-im} report the trainable-%
+centroid variants and the random-initialisation run on the two surfaces.
+Trainable centroids (v1, v2) track the frozen model almost exactly --- the best
+single cell is v1 at epoch~5 ($7.36\%$), a marginal edge --- reinforcing the
+training-loss finding that the centroid machinery adds little. The
+random-initialisation run is the telling case: although it achieved the
+\emph{lowest training loss} of any full-catalog configuration
+(Section~\ref{sec:emb-experiments}), its CTR is markedly \emph{worse} than
+text-initialisation, at $6.18\%$ (epoch~10, mobile, week of 1~June) against the
+frozen model's $7.24\%$, and far worse at epoch~1 ($3.48\%$ versus $5.93\%$).
+Lower loss, worse recommendations.
+
+\begin{table}[ht]
+  \centering
+  \caption{Offline CTR (\%, IMOB / mobile) for the full-catalog embedding
+           variants on held-out weeks of June~2025.}
+  \label{tab:emb-ctr-imob}
+  \small
+  \begin{tabular}{lcccc}
+    \toprule
+    Variant (epoch) & 01~Jun & 08~Jun & 15~Jun & 22~Jun \\
+    \midrule
+    Frozen centroids, e1   & $5.93$ & $5.67$ & $5.48$ & $5.33$ \\
+    Frozen centroids, e5   & $7.22$ & $6.94$ & $6.61$ & $6.34$ \\
+    Frozen centroids, e10  & $7.24$ & $6.96$ & $6.61$ & $6.34$ \\
+    Trainable v1, e1       & $6.25$ & $5.98$ & $5.74$ & $5.58$ \\
+    Trainable v1, e5       & $7.36$ & $7.03$ & $6.76$ & $6.53$ \\
+    Trainable v1, e10      & $7.20$ & $6.87$ & $6.59$ & $6.35$ \\
+    Trainable v2, e5       & $6.03$ & $5.76$ & $5.55$ & $5.37$ \\
+    Trainable v2, e10      & $7.26$ & $6.93$ & $6.64$ & $6.40$ \\
+    Random init, e1        & $3.48$ & $3.35$ & $3.06$ & $2.85$ \\
+    Random init, e5        & $6.05$ & $5.81$ & $5.50$ & $5.20$ \\
+    Random init, e10       & $6.18$ & $5.93$ & $5.65$ & $5.35$ \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\begin{table}[ht]
+  \centering
+  \caption{Offline CTR (\%, IM / web) for the full-catalog embedding variants on
+           held-out weeks of June~2025. (Frozen-model web CTR was reported only
+           under the geographic slices of Table~\ref{tab:emb-ctr-delhi}.)}
+  \label{tab:emb-ctr-im}
+  \small
+  \begin{tabular}{lcccc}
+    \toprule
+    Variant (epoch) & 01~Jun & 08~Jun & 15~Jun & 22~Jun \\
+    \midrule
+    Trainable v1, e1   & $5.37$ & $5.13$ & $5.00$ & $4.91$ \\
+    Trainable v1, e5   & $5.87$ & $5.42$ & $5.38$ & $5.46$ \\
+    Trainable v1, e10  & $5.45$ & $5.05$ & $4.96$ & $4.91$ \\
+    Trainable v2, e5   & $5.23$ & $4.95$ & $4.89$ & $4.94$ \\
+    Trainable v2, e10  & $5.52$ & $5.09$ & $5.00$ & $4.93$ \\
+    Random init, e1    & $1.73$ & $1.65$ & $1.67$ & $1.93$ \\
+    Random init, e5    & $3.77$ & $3.45$ & $3.49$ & $3.85$ \\
+    Random init, e10   & $4.00$ & $3.70$ & $3.69$ & $3.77$ \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\subsection{Geographic Slices}
+\label{sec:emb-geo-ctr}
+Because recommendations are geographically filtered at serving time, CTR was
+also computed under two Delhi-scoped evaluation filters, denoted \emph{Delhi
+strict} and \emph{Delhi cluster}, for the frozen hierarchical model.
+Table~\ref{tab:emb-ctr-delhi} gives both, on both surfaces, at epochs~1, 5,
+and~10. The absolute levels are lower than the unfiltered headline (the filters
+restrict the candidate pool), but the qualitative picture is unchanged: CTR
+improves with training and mobile leads web.
+
+\begin{table}[ht]
+  \centering
+  \caption{Offline CTR (\%) of the frozen hierarchical softmax model under Delhi
+           geographic filters, by surface and epoch, June~2025.}
+  \label{tab:emb-ctr-delhi}
+  \small
+  \resizebox{\textwidth}{!}{%
+  \begin{tabular}{llccccccccc}
+    \toprule
+    & & \multicolumn{3}{c}{Delhi strict} & & \multicolumn{3}{c}{Delhi cluster} \\
+    \cmidrule(lr){3-5}\cmidrule(lr){7-9}
+    Surface & Week & e1 & e5 & e10 & & e1 & e5 & e10 \\
+    \midrule
+    IMOB & 01~Jun & $6.15$ & $6.36$ & $5.96$ & & $5.44$ & $5.83$ & $5.60$ \\
+    IMOB & 08~Jun & $5.93$ & $6.51$ & $6.24$ & & $5.46$ & $5.90$ & $5.71$ \\
+    IMOB & 15~Jun & $6.11$ & $6.45$ & $6.18$ & & $5.52$ & $5.79$ & $5.59$ \\
+    IMOB & 22~Jun & $6.40$ & $6.80$ & $6.54$ & & $5.56$ & $5.83$ & $5.56$ \\
+    \midrule
+    IM   & 01~Jun & $5.65$ & $5.37$ & $5.08$ & & $5.37$ & $5.44$ & $4.82$ \\
+    IM   & 08~Jun & $5.28$ & $5.05$ & $4.85$ & & $4.29$ & $4.08$ & $3.80$ \\
+    IM   & 15~Jun & $5.75$ & $5.51$ & $5.09$ & & $4.59$ & $4.54$ & $4.27$ \\
+    IM   & 22~Jun & $5.75$ & $4.83$ & $4.39$ & & $4.94$ & $5.33$ & $5.06$ \\
+    \bottomrule
+  \end{tabular}%
+  }
+\end{table}
+
+\subsection{Industry Subset: Flat versus Hierarchical}
+\label{sec:emb-industry-ctr}
+The most instructive comparison is on the Furniture subset, where the flat and
+hierarchical objectives were trained under identical conditions.
+Tables~\ref{tab:emb-ctr-flat} and~\ref{tab:emb-ctr-hier} report CTR for the two.
+Recall that on the training objective the flat model was the clear winner
+(Section~\ref{sec:emb-findings}). On recommendation quality the ranking
+\emph{inverts}. The hierarchical model climbs from $3.78\%$ (epoch~1, mobile,
+week of 1~June) to $7.10\%$ by epoch~50, whereas the flat model peaks at
+$4.91\%$ at epoch~1 and then \emph{degrades} with further training, settling
+around $3.0\%$ --- worse than where it started. The configuration with the lower
+training loss produces the worse, and worsening, recommendations.
+
+\begin{table}[ht]
+  \centering
+  \caption{Furniture-subset offline CTR (\%) for the \emph{flat} objective, by
+           surface and epoch, June~2025.}
+  \label{tab:emb-ctr-flat}
+  \small
+  \begin{tabular}{llccccc}
+    \toprule
+    Surface & Week & e1 & e5 & e10 & e20 & e30 \\
+    \midrule
+    IMOB & 01~Jun & $4.91$ & $3.07$ & $2.98$ & $3.00$ & $3.00$ \\
+    IMOB & 08~Jun & $4.76$ & $2.95$ & $2.94$ & $2.91$ & $2.93$ \\
+    IMOB & 15~Jun & $4.65$ & $2.86$ & $2.81$ & $2.87$ & $2.89$ \\
+    IMOB & 22~Jun & $4.55$ & $2.77$ & $2.76$ & $2.82$ & $2.82$ \\
+    \midrule
+    IM   & 01~Jun & $3.68$ & $2.17$ & $2.19$ & $2.35$ & $2.38$ \\
+    IM   & 08~Jun & $3.13$ & $2.03$ & $1.92$ & $1.81$ & $1.73$ \\
+    IM   & 15~Jun & $3.15$ & $1.96$ & $1.88$ & $1.88$ & $1.96$ \\
+    IM   & 22~Jun & $3.35$ & $1.96$ & $2.16$ & $2.15$ & $2.05$ \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\begin{table}[ht]
+  \centering
+  \caption{Furniture-subset offline CTR (\%) for the \emph{hierarchical}
+           objective, by surface and epoch, June~2025.}
+  \label{tab:emb-ctr-hier}
+  \small
+  \begin{tabular}{llcccc}
+    \toprule
+    Surface & Week & e1 & e10 & e25 & e50 \\
+    \midrule
+    IMOB & 01~Jun & $3.78$ & $6.83$ & $7.13$ & $7.10$ \\
+    IMOB & 08~Jun & $3.62$ & $6.54$ & $6.86$ & $6.87$ \\
+    IMOB & 15~Jun & $3.54$ & $6.28$ & $6.58$ & $6.61$ \\
+    IMOB & 22~Jun & $3.42$ & $6.11$ & $6.33$ & $6.43$ \\
+    \midrule
+    IM   & 01~Jun & $2.80$ & $4.13$ & $4.29$ & $4.29$ \\
+    IM   & 08~Jun & $2.56$ & $3.66$ & $3.89$ & $3.92$ \\
+    IM   & 15~Jun & $2.46$ & $3.67$ & $3.75$ & $3.77$ \\
+    IM   & 22~Jun & $2.65$ & $3.91$ & $4.00$ & $3.98$ \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\subsection{Discussion: Training Loss versus Recommendation Quality}
+\label{sec:emb-discussion}
+The evaluation delivers a consistent and cautionary message. In the two places
+where the training objective and recommendation quality could be compared
+head-to-head, they disagreed. Random initialisation reached a lower weighted NLL
+than text initialisation yet produced lower CTR; the flat objective reached a
+much lower NLL than the hierarchical objective on the Furniture subset yet
+produced substantially lower CTR, degrading as its loss improved. Weighted
+negative log-likelihood is thus, in this setting, an unreliable proxy for
+recommendation quality --- driving it down can leave retrieval unchanged or make
+it worse.
+
+Two practical conclusions follow. First, text-based initialisation is valuable
+for \emph{recommendations} even though it is not the loss optimum: the geometry
+inherited from product text places items sensibly from the outset, and training
+away from it (as random init does) trades a better loss for worse retrieval.
+Second, the hierarchical decomposition, though it contributes little gradient
+signal and is beaten on loss by the flat softmax, yields better recommendations
+at subset scale --- its restriction of the product softmax to within-category
+candidates appears to act as a useful inductive constraint rather than merely a
+computational convenience. Overall, the best embedding configuration (text-%
+initialised hierarchical softmax, $\approx 7.2\%$ CTR on mobile) is a clear
+improvement over the content-only baseline but remains below the
+frequency-based incumbent with backfilling, which motivates the further
+directions explored elsewhere in this thesis.
