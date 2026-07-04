@@ -1,0 +1,503 @@
+%==============================================================
+%  Chapter 4 -- Embedding-Based Item-to-Item Recommendation
+%  Sources: "Hierarchical Cosine-Softmax Objective for Product
+%  Embeddings" (spec) and "hierarchical_embedding_experiments"
+%  (as-built + experiments). Both are the user's own work.
+%
+%  NOTE: all reported numbers are TRAINING-OBJECTIVE results
+%  (weighted NLL). Recommendation-quality (offline CTR) evaluation
+%  is out of scope for this chapter and stated as such.
+%==============================================================
+\chapter{Embedding-Based Item-to-Item Recommendation}
+\label{ch:embedding}
+
+The chapters so far model recommendation through transition matrices and their
+powers. This chapter takes a different representation: it learns a single dense
+\emph{embedding} for every product, such that products between which users
+transition end up close together in vector space, and then serves
+recommendations by nearest-neighbour search in that space. The construction is
+at once content-based and collaborative --- embeddings are \emph{cold-started}
+from product text metadata and then \emph{refined} from observed item-to-item
+interactions --- and it is organised around the product category hierarchy. We
+present the model as originally specified (a hierarchical cosine-softmax
+objective), the extensions made during development (trainable centroids and a
+flat alternative), the implementation as actually built, and a sequence of
+controlled training experiments together with what they reveal.
+
+A caveat frames the entire chapter. All reported results are
+\emph{training-objective} results --- the weighted negative log-likelihood
+being optimised. Offline recommendation-quality evaluation (click-through
+proxies) is conducted separately and is out of scope here; every conclusion
+below is therefore a statement about optimisation behaviour, not about
+retrieval quality.
+
+%--------------------------------------------------------------
+\section{Problem and Setup}
+\label{sec:emb-problem}
+
+The goal is an item-to-item recommender for IndiaMART that learns a dense
+embedding $e_p \in \mathbb{R}^{d}$ for every product $p$, using observed
+interaction data together with the product category hierarchy. Two data
+structures are available:
+
+\begin{itemize}
+  \item \textbf{Interaction logs} of the form $(\text{prod } i \to
+        \text{prod } j)$, recording that users transitioned from product $i$ to
+        product $j$.
+  \item \textbf{A hierarchical taxonomy},
+        $\text{Industry} \to \text{Sub-category} \to \text{Main-category} \to
+        \text{Product}$. The core formulation uses the two levels immediately
+        above products --- sub-category and main-category.
+  \item \textbf{Product-level metadata} (name, summary, category text,
+        specifications, seller details) used \emph{only} to initialise product
+        embeddings.
+\end{itemize}
+
+Training is confined to a clean slice of the logs. Only interactions with
+$\text{MODID}=\text{IMOB}$ are used; only rows with positive $\text{ProdID}_1$
+and $\text{ProdID}_2$ are considered valid; an interaction is dropped if either
+product lacks an initial embedding; the taxonomy carried by the interaction
+data is treated as the source of truth during training; and duplicate
+transitions are aggregated, so training operates on \emph{weighted} interaction
+pairs. The objectives are then to (i)~learn one product embedding $e_p$ per
+product, (ii)~use a hierarchical, cosine-similarity-based softmax factorisation
+over sub-category, main-category, and products to define a likelihood for each
+observed transition $(i\to j)$, (iii)~maximise the log-likelihood
+(equivalently, minimise the negative log-likelihood) by gradient descent, and
+(iv)~in the baseline, use fixed frozen centroids for sub- and main-categories,
+computed from the initial product embeddings.
+
+At inference the learned embeddings are consumed by a vector-search setup that
+computes the top-$k$ similar products for each product. Both the products
+updated through interaction training and those that remain at their initial
+text-based embeddings are retained in the final retrieval space. The hierarchy
+is thus used during \emph{training} as a structured objective, not for online
+inference.
+
+%--------------------------------------------------------------
+\section{The Hierarchical Cosine-Softmax Objective}
+\label{sec:emb-model}
+
+\subsection{Intuition}
+The core idea treats product interactions much like Word2Vec-style
+skip-gram~\cite{Mikolov13} on item sequences: if users frequently move from
+product $i$ to product $j$, then the embedding of $i$ should have high
+similarity with the embedding of $j$. Rather than a flat softmax over the
+entire catalogue, the probability of observing $j$ given $i$ is factored along
+the hierarchy into three levels --- sub-category, then main-category, then
+product --- each parameterised by cosine similarities between the source
+embedding and the relevant category or product embeddings. This hierarchical
+softmax~\cite{Morin05} makes the normalisation tractable at catalogue scale.
+
+\subsection{Notation}
+Let $e_p \in \mathbb{R}^{d}$ be the embedding of product $p$;
+$c^{(\text{sub})}_s \in \mathbb{R}^{d}$ the embedding of sub-category $s$; and
+$c^{(\text{mcat})}_m \in \mathbb{R}^{d}$ the embedding of main-category $m$.
+Write $S$ for the set of all sub-categories, $M(s)$ for the main-categories
+belonging to sub-category $s$, and $P_m$ for the products belonging to
+main-category $m$. For a target product $j$, let $S_j$ and $M_j$ be its
+sub-category and main-category. All embeddings are $L_2$-normalised on the
+forward pass, so that $\lVert e_p\rVert_2 = \lVert c^{(\text{sub})}_s\rVert_2 =
+\lVert c^{(\text{mcat})}_m\rVert_2 = 1$, and cosine similarity reduces to a dot
+product, $\cos(x,y) = x\cdot y$.
+
+\subsection{Probability Factorisation}
+Given a source product $i$ and target product $j$, the three levels are:
+\begin{align}
+  P_{\text{sub}}(S_j \mid i)
+    &= \frac{\exp\!\big(e_i^\top c^{(\text{sub})}_{S_j}\big)}
+            {\sum_{s\in S}\exp\!\big(e_i^\top c^{(\text{sub})}_{s}\big)},
+    \label{eq:emb-psub}\\[4pt]
+  P_{\text{mcat}}(M_j \mid i, S_j)
+    &= \frac{\exp\!\big(e_i^\top c^{(\text{mcat})}_{M_j}\big)}
+            {\sum_{m\in M(S_j)}\exp\!\big(e_i^\top c^{(\text{mcat})}_{m}\big)},
+    \label{eq:emb-pmcat}\\[4pt]
+  P_{\text{prod}}(j \mid i, M_j)
+    &= \frac{\exp\!\big(e_i^\top e_j\big)}
+            {\sum_{k\in P_{M_j}}\exp\!\big(e_i^\top e_k\big)}.
+    \label{eq:emb-pprod}
+\end{align}
+The main-category softmax is restricted to the main-categories under the target
+sub-category $S_j$, and the product softmax is restricted to the products in
+the target main-category $M_j$. The overall probability of observing $j$ given
+$i$ is the product of the three:
+\begin{equation}
+  \label{eq:emb-ptotal}
+  P_{\text{total}}(j\mid i)
+    = P_{\text{sub}}(S_j\mid i)\,
+      P_{\text{mcat}}(M_j\mid i,S_j)\,
+      P_{\text{prod}}(j\mid i,M_j).
+\end{equation}
+
+\subsection{Loss and Dataset Objective}
+For one observed interaction $(i\to j)$ the log-likelihood decomposes additively
+across the three levels, and the per-sample loss is the negative log-likelihood
+\begin{equation}
+  \label{eq:emb-loss}
+  \ell(i,j) = -\log P_{\text{total}}(j\mid i)
+            = \ell_{\text{sub}}(i,j) + \ell_{\text{mcat}}(i,j)
+              + \ell_{\text{prod}}(i,j),
+\end{equation}
+with the three terms
+\begin{align}
+  \ell_{\text{sub}}(i,j)  &= -e_i^\top c^{(\text{sub})}_{S_j}
+     + \log\!\sum_{s\in S}\exp\!\big(e_i^\top c^{(\text{sub})}_{s}\big),
+     \label{eq:emb-lsub}\\
+  \ell_{\text{mcat}}(i,j) &= -e_i^\top c^{(\text{mcat})}_{M_j}
+     + \log\!\sum_{m\in M(S_j)}\exp\!\big(e_i^\top c^{(\text{mcat})}_{m}\big),
+     \label{eq:emb-lmcat}\\
+  \ell_{\text{prod}}(i,j) &= -e_i^\top e_j
+     + \log\!\sum_{k\in P_{M_j}}\exp\!\big(e_i^\top e_k\big).
+     \label{eq:emb-lprod}
+\end{align}
+Let $\mathcal{D}_{\text{agg}}$ be the set of aggregated interaction pairs and
+$w_{ij}$ the number of times transition $i\to j$ was observed after filtering.
+The dataset-level objective is the weighted sum
+\begin{equation}
+  \label{eq:emb-objective}
+  \mathcal{L}
+    = \sum_{(i,j)\in\mathcal{D}_{\text{agg}}} w_{ij}\,\ell(i,j)
+    = -\sum_{(i,j)\in\mathcal{D}_{\text{agg}}} w_{ij}\,
+        \log P_{\text{total}}(j\mid i),
+\end{equation}
+minimised using SGD or Adam.
+
+\subsection{Gradients}
+Define the three softmax probabilities $p_{\text{sub}}(s\mid i)$,
+$p_{\text{mcat}}(m\mid i,S_j)$, and $p_{\text{prod}}(k\mid i,M_j)$ exactly as in
+\eqref{eq:emb-psub}--\eqref{eq:emb-pprod} but read as distributions over $s\in
+S$, $m\in M(S_j)$, and $k\in P_{M_j}$ respectively. The gradient of the
+per-sample loss with respect to the \emph{source-role} occurrence of $e_i$ is
+\begin{equation}
+  \label{eq:emb-grad-ei}
+  \frac{\partial\ell(i,j)}{\partial e_i}
+    = \Big(\sum_{s\in S} p_{\text{sub}}(s\mid i)\,c^{(\text{sub})}_{s}
+           - c^{(\text{sub})}_{S_j}\Big)
+    + \Big(\sum_{m\in M(S_j)} p_{\text{mcat}}(m\mid i,S_j)\,c^{(\text{mcat})}_{m}
+           - c^{(\text{mcat})}_{M_j}\Big)
+    + \Big(\sum_{k\in P_{M_j}} p_{\text{prod}}(k\mid i,M_j)\,e_k - e_j\Big),
+\end{equation}
+and for a \emph{target-role} occurrence $e_k$ with $k\in P_{M_j}$,
+\begin{equation}
+  \label{eq:emb-grad-ek}
+  \frac{\partial\ell(i,j)}{\partial e_k}
+    = \big(p_{\text{prod}}(k\mid i,M_j) - \mathbf{1}[k=j]\big)\,e_i.
+\end{equation}
+Because a single embedding table is used for both source and target roles, the
+total gradient for a product embedding is the sum of all its contributions
+across every interaction in which it appears as either a source or a target. In
+the baseline the sub- and main-category centroids are fixed and frozen: they
+participate in the forward pass but receive no gradient.
+
+%--------------------------------------------------------------
+\section{Extensions}
+\label{sec:emb-extensions}
+
+Two variants were developed beyond the frozen-centroid baseline.
+
+\subsection{Trainable Centroids}
+Here the loss form is unchanged, but $c^{(\text{sub})}_s$ and
+$c^{(\text{mcat})}_m$ become learned parameters and therefore receive gradient
+through their respective softmax denominators:
+\begin{align}
+  \frac{\partial\ell(i,j)}{\partial c^{(\text{sub})}_{s}}
+    &= \big(p_{\text{sub}}(s\mid i) - \mathbf{1}[s=S_j]\big)\,e_i,
+    \label{eq:emb-grad-csub}\\
+  \frac{\partial\ell(i,j)}{\partial c^{(\text{mcat})}_{m}}
+    &= \big(p_{\text{mcat}}(m\mid i,S_j) - \mathbf{1}[m=M_j]\big)\,e_i,
+       \qquad m\in M(S_j).
+    \label{eq:emb-grad-cmcat}
+\end{align}
+Main-category centroids outside $M(S_j)$ receive no gradient from the pair
+$(i,j)$. Centroids are $L_2$-normalised on the forward pass exactly as products
+are, though their master state is not constrained to unit norm between steps.
+
+\subsection{Flat Objective}
+The flat variant removes the hierarchical decomposition entirely, using a
+single softmax over the whole product universe of size $N$:
+\begin{equation}
+  \label{eq:emb-flat}
+  P(j\mid i) = \frac{\exp\!\big(e_i^\top e_j\big)}
+                    {\sum_{k=1}^{N}\exp\!\big(e_i^\top e_k\big)},
+  \qquad
+  \ell(i,j) = -e_i^\top e_j
+    + \log\!\sum_{k=1}^{N}\exp\!\big(e_i^\top e_k\big),
+\end{equation}
+with gradients, writing $p(k\mid i)=\exp(e_i^\top e_k)/\sum_t\exp(e_i^\top
+e_t)$,
+\begin{equation}
+  \label{eq:emb-flat-grad}
+  \frac{\partial\ell(i,j)}{\partial e_i} = \sum_{k=1}^{N} p(k\mid i)\,e_k - e_j,
+  \qquad
+  \frac{\partial\ell(i,j)}{\partial e_k}
+    = \big(p(k\mid i) - \mathbf{1}[k=j]\big)\,e_i.
+\end{equation}
+The defining practical difference is the product-softmax denominator: the
+hierarchical objective restricts it to $P_{M_j}$, so only products in the
+target's main-category receive product-level gradient from a given pair,
+whereas the flat objective places every product in every denominator, producing
+a far denser gradient signal per step at correspondingly higher compute cost.
+
+\subsection{Tied Embedding Table}
+A single embedding table is shared between the source and target roles. For any
+product that appears as both a source (via $e_i$) and a candidate (via $e_k$),
+the total gradient is the sum of its source-role and candidate-role
+contributions, applied once per optimisation step. This holds in both the
+hierarchical and flat objectives, and is handled in the implementation by
+merging the two gradient contributions before the Adam update.
+
+%--------------------------------------------------------------
+\section{Implementation}
+\label{sec:emb-impl}
+
+Training is organised into four phases. \textbf{Phase~A (interaction
+preprocessing)} filters the interaction CSVs to valid product-to-product
+transitions, maps them to embedding row indices, and aggregates them into
+weighted pairs $(\text{src},\text{tgt},\text{count})$. \textbf{Phase~B
+(taxonomy and centroids)} assigns each product to a sub- and main-category via
+an admin taxonomy mapping and computes the sub- and main-category centroids as
+the mean of member product embeddings. \textbf{Phase~C (embedding training)} is
+the core optimisation and the locus of all experimental variation.
+\textbf{Phase~D (recommendation generation)} $L_2$-normalises the final
+embeddings, indexes them with a FAISS HNSW graph~\cite{FAISS,HNSW}, and queries
+them to produce top-$K$ recommendations.
+
+\paragraph{Optimiser and memory.}
+All experiments use Adam with $\beta_1=0.9$, $\beta_2=0.999$,
+$\epsilon=10^{-8}$, applied sparsely to the rows touched in each microbatch. The
+embedding table and Adam moments are held in RAM as master state
+($\approx 92$~GB for $20.2\text{M}\times 384$ across the parameter and the two
+moment tensors), while per-training-block state is staged on the GPU, and disk
+synchronisation occurs at the end of each epoch.
+
+\paragraph{Performance rewrite.}
+An initial memmap-backed implementation was bottlenecked by disk I/O and
+host-device transfers, running at $\approx 2473$~s/epoch with the GPU at roughly
+$15\%$ utilisation. Moving the master state to RAM, keeping per-block state
+GPU-resident, and performing the Adam update on the GPU reduced this to
+$\approx 780$~s/epoch --- a $3.2\times$ speed-up --- with no change to the
+objective; training-loss curves before and after matched to within $0.1\%$ per
+epoch, confirming the rewrite preserved the mathematics.
+
+\paragraph{Correctness fixes.}
+Two correctness-relevant fixes were made, both affecting the comparability of
+results. First, \emph{sparse-update scope}: the optimised implementation
+initially applied Adam densely to a block-level set of source rows each
+microbatch, including rows with zero gradient; because Adam's update term is
+nonzero even under zero gradient (the moment estimates decay at different
+rates), this perturbed embeddings that should not have moved. It was fixed by
+restricting each microbatch's Adam step to the rows that actually participated.
+Second, \emph{tied-embedding coherence}: the first fix exposed a case where a
+product appearing in both the source set and the candidate pool could have its
+two GPU views diverge across microbatches; this was fixed by synchronising all
+overlapping rows from the candidate-pool tensor back to the source tensor at the
+end of each microbatch. Both fixes were in place for all trainable-centroid,
+learning-rate-sweep, random-init, and industry-subset experiments; only the two
+earliest full-catalog runs predate them and are approximately correct.
+
+%--------------------------------------------------------------
+\section{Experiments}
+\label{sec:emb-experiments}
+
+\subsection{Scale and Protocol}
+The experiments were run at the scale summarised in
+Table~\ref{tab:emb-scale}. All full-catalog runs share a catalogue of
+$20{,}205{,}770\times 384$, Adam with $(\beta_1,\beta_2,\epsilon)=(0.9,0.999,
+10^{-8})$, seed $42$, microbatch size $4096$, and a weighted-NLL loss.
+Throughout, \emph{avg/pair} denotes the total weighted loss divided by the total
+interaction weight, so that it is comparable across runs of differing size.
+
+\begin{table}[ht]
+  \centering
+  \caption{Catalogue and data scale used in the embedding experiments
+           (Phase~A aggregation).}
+  \label{tab:emb-scale}
+  \begin{tabular}{lr}
+    \toprule
+    Quantity & Value \\
+    \midrule
+    Products (embedding universe)     & $20{,}205{,}770$ \\
+    Embedding dimension $d$           & $384$ \\
+    Sub-categories                    & $687$ \\
+    Main-categories                   & $98{,}353$ \\
+    Aggregated interaction pairs      & $85{,}565{,}684$ \\
+    Total interaction weight          & $130{,}702{,}326$ \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\subsection{Full-Catalog Results}
+Table~\ref{tab:emb-full} collects the nine full-catalog runs: the two earliest
+hierarchical runs (pre- and post-rewrite, frozen centroids), the two
+trainable-centroid variants, a four-point product learning-rate sweep, and a
+pure-random-initialisation run. The lowest total loss and the lowest avg/pair
+of any full-catalog configuration are both achieved by the random-init run
+(experiment~9).
+
+\begin{table}[ht]
+  \centering
+  \caption{Full-catalog training results (weighted NLL). ``Cent.\ LR'' applies
+           only to trainable-centroid runs. Best values in bold.}
+  \label{tab:emb-full}
+  \resizebox{\textwidth}{!}{%
+  \begin{tabular}{clllccrr}
+    \toprule
+    \# & Variant & Init & Centroids & Prod.\ LR & Cent.\ LR & Epochs
+       & Final total loss / avg/pair \\
+    \midrule
+    1 & Hierarchical (pre-rewrite) & text   & frozen    & $1\mathrm{e}{-3}$ & ---
+      & 15 & $2.211\mathrm{e}{9}$ / $16.930$ \\
+    2 & Frozen, optimized          & text   & frozen    & $1\mathrm{e}{-3}$ & ---
+      & 10 & $2.2164\mathrm{e}{9}$ / $16.958$ \\
+    3 & Trainable centroids v1     & text   & trainable & $1\mathrm{e}{-3}$
+      & $1\mathrm{e}{-4}$ (both) & 10 & $2.1964\mathrm{e}{9}$ / $16.799$ \\
+    4 & Trainable centroids v2     & text   & trainable & $1\mathrm{e}{-3}$
+      & sub $1\mathrm{e}{-5}$, mcat $1\mathrm{e}{-4}$ & 10
+      & $2.1975\mathrm{e}{9}$ / $16.813$ \\
+    5 & LR sweep                   & text   & frozen    & $1\mathrm{e}{-3}$ & ---
+      & 5  & $2.2305\mathrm{e}{9}$ / $17.065$ \\
+    6 & LR sweep                   & text   & frozen    & $3\mathrm{e}{-3}$ & ---
+      & 5  & $2.2177\mathrm{e}{9}$ / $16.968$ \\
+    7 & LR sweep                   & text   & frozen    & $1\mathrm{e}{-2}$ & ---
+      & 5  & $2.2118\mathrm{e}{9}$ / $16.922$ \\
+    8 & LR sweep                   & text   & frozen    & $5\mathrm{e}{-2}$ & ---
+      & 5  & $2.2150\mathrm{e}{9}$ / $16.947$ \\
+    9 & Random init                & random & trainable & $1\mathrm{e}{-2}$
+      & sub $1\mathrm{e}{-4}$, mcat $1\mathrm{e}{-3}$ & 10
+      & $\mathbf{2.1831\mathrm{e}{9}}$ / $\mathbf{16.703}$ \\
+    \bottomrule
+  \end{tabular}%
+  }
+\end{table}
+
+\subsection{Component-Split Diagnostic}
+A key diagnostic logged the three loss terms separately.
+Table~\ref{tab:emb-split} gives representative values for the frozen-centroid,
+text-init run (experiment~2). Across every full-catalog configuration,
+$\ell_{\text{sub}}$ and $\ell_{\text{mcat}}$ are nearly flat --- indeed
+$\ell_{\text{sub}}$ tends to drift slightly \emph{upward} --- while
+$\ell_{\text{prod}}$ accounts for essentially all of the loss reduction.
+
+\begin{table}[ht]
+  \centering
+  \caption{Per-component loss over epochs (experiment~2: text init, frozen
+           centroids).}
+  \label{tab:emb-split}
+  \begin{tabular}{cccc}
+    \toprule
+    Epoch & $\ell_{\text{sub}}$ & $\ell_{\text{mcat}}$ & $\ell_{\text{prod}}$ \\
+    \midrule
+    1  & $8.041\mathrm{e}{8}$ & $6.652\mathrm{e}{8}$ & $8.121\mathrm{e}{8}$ \\
+    5  & $7.982\mathrm{e}{8}$ & $6.637\mathrm{e}{8}$ & $7.685\mathrm{e}{8}$ \\
+    10 & $8.015\mathrm{e}{8}$ & $6.644\mathrm{e}{8}$ & $7.505\mathrm{e}{8}$ \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\subsection{Random Initialisation}
+In this run the embeddings were replaced with $\mathcal{N}(0,\sigma^2)$ samples,
+$\sigma=0.02$, drawn deterministically (seed $42$) at the same
+$20{,}205{,}770\times 384$ shape, with centroids recomputed from the random
+embeddings. Three observations stand out: the random-init epoch-1
+$\ell_{\text{prod}}$ ($7.80\mathrm{e}{8}$) was already \emph{lower} than the
+text-init epoch-1 $\ell_{\text{prod}}$ ($8.12\mathrm{e}{8}$);
+$\ell_{\text{prod}}$ reached its minimum by epoch~4 and then crept upward
+slightly; and the run produced the lowest total loss of any full-catalog
+configuration.
+
+\subsection{Industry-Subset Experiments (Furniture)}
+To enable faster iteration and to test the architecture at smaller scale, the
+pipeline was restricted to a single industry (Furniture) by filtering and
+reindexing while preserving the original taxonomy --- $608{,}287$ products,
+$2{,}065{,}519$ aggregated pairs, and $1{,}305$ main-categories.
+Table~\ref{tab:emb-furniture} contrasts the hierarchical objective with the
+flat objective under identical data, initialisation, and learning rate.
+
+\begin{table}[ht]
+  \centering
+  \caption{Furniture-subset training results: hierarchical versus flat
+           objective.}
+  \label{tab:emb-furniture}
+  \begin{tabular}{cllcr}
+    \toprule
+    \# & Variant & Objective & Epochs & Final avg/pair \\
+    \midrule
+    10 & Furniture hierarchical & 3-term hierarchical     & 50 & $13.204$ \\
+    11 & Furniture flat         & flat over $608{,}287$    & 30 & $12.354$ \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+The gap is stark. The hierarchical subset run moved avg/pair by only $0.030$
+over $50$ epochs ($13.234\to 13.204$), whereas the flat run moved it by $0.300$
+over $30$ epochs ($12.654\to 12.354$) --- with the epoch-1 flat loss already
+below the hierarchical run's converged value. At convergence the flat model
+sits roughly one nat below the uniform-random baseline of
+$\log(608{,}287)\approx 13.32$.
+
+%--------------------------------------------------------------
+\section{Findings}
+\label{sec:emb-findings}
+
+The training-loss evidence points to three consistent conclusions. Each
+concerns optimisation behaviour only; recommendation-quality evaluation is
+required to confirm whether any of them translates into better retrieval.
+
+\begin{enumerate}
+  \item \textbf{The hierarchical structure contributes little learning signal.}
+        Across all full-catalog configurations the sub- and main-category loss
+        terms are effectively static while the product term does nearly all the
+        work (Table~\ref{tab:emb-split}). The three-level decomposition behaves
+        as a denominator-sharing \emph{computational} structure rather than as a
+        source of useful gradient. Frozen centroids do not by themselves imply
+        static sub/mcat loss: those terms still move because the source
+        embeddings $e_i$ scored against the fixed centroids are themselves
+        changing each step --- in the text-init case, drifting away from their
+        sub-category centroid and slowly raising $\ell_{\text{sub}}$.
+  \item \textbf{Text-based initialisation is a head start, not an optimum.}
+        Random initialisation reached a lower total loss than text
+        initialisation, and did so with a lower product loss even in the first
+        epoch. The geometry imposed by product text is therefore correlated
+        with, but distinct from, the geometry that best predicts interactions;
+        training spends effort relaxing the text geometry toward the interaction
+        geometry.
+  \item \textbf{Flat softmax materially outperforms the hierarchical objective
+        at subset scale.} Under identical data, initialisation, and learning
+        rate, the flat objective achieved roughly an order of magnitude more
+        loss reduction than the hierarchical objective on the Furniture subset.
+        The hierarchical decomposition, attractive for tractability at full
+        catalogue scale, appears to \emph{impede} convergence when the universe
+        is small enough for a full softmax to be computed directly.
+\end{enumerate}
+
+For reference, Table~\ref{tab:emb-hparams} lists the hyperparameters used across
+the experiments. All runs are seeded ($42$) for embedding initialisation and
+microbatch shuffling; random embeddings are generated deterministically from
+\texttt{numpy.random.default\_rng(42)} at the catalogue shape and frozen to
+disk; master state (embeddings and Adam moments) is synchronised to disk at each
+epoch end for exact resume; and per-epoch summaries are written to a
+\texttt{train\_state.json} for every run.
+
+\begin{table}[ht]
+  \centering
+  \caption{Hyperparameter reference for the embedding experiments.}
+  \label{tab:emb-hparams}
+  \begin{tabular}{ll}
+    \toprule
+    Hyperparameter & Value(s) used \\
+    \midrule
+    Embedding dimension $d$          & $384$ \\
+    Optimiser                        & Adam \\
+    $\beta_1,\beta_2,\epsilon$       & $0.9,\ 0.999,\ 10^{-8}$ \\
+    Product learning rate            & $1\mathrm{e}{-3},\ 3\mathrm{e}{-3},\ 1\mathrm{e}{-2},\ 5\mathrm{e}{-2}$ \\
+    Sub-category centroid LR         & $1\mathrm{e}{-4}$ (v1), $1\mathrm{e}{-5}$ (v2), $1\mathrm{e}{-4}$ (random init) \\
+    Main-category centroid LR        & $1\mathrm{e}{-4}$ (v1), $1\mathrm{e}{-4}$ (v2), $1\mathrm{e}{-3}$ (random init) \\
+    Microbatch size (hierarchical)   & $4096$ pairs per main-category block \\
+    Microbatch size (flat)           & $1024$ pairs \\
+    Epochs                           & $5\,/\,10\,/\,15\,/\,30\,/\,50$ (per experiment) \\
+    Random seed                      & $42$ \\
+    Random-init distribution         & $\mathcal{N}(0,\,0.02^2)$ \\
+    Weight scale                     & $1.0$ \\
+    \bottomrule
+  \end{tabular}
+\end{table}
