@@ -304,16 +304,6 @@ weighting the reconstruction error on the observed entries dropped almost to
 zero, a dramatic improvement over both ALS (Section~\ref{sec:als}) and
 unweighted NMF.
 
-% FIGURE PLACEHOLDER: user to supply the error-comparison plot (ALS vs NMF
-% vs binary-weighted WNMF) into figures/.
-% \begin{figure}[ht]
-%   \centering
-%   \includegraphics[width=0.8\textwidth]{figures/mf_error_comparison.png}
-%   \caption{Normalised reconstruction error across the three factorization
-%            methods.}
-%   \label{fig:mf-error}
-% \end{figure}
-
 Table~\ref{tab:mf-comparison} collects the comparison qualitatively; the
 quantitative error figures from the experiments are reported where available.
 
@@ -327,7 +317,7 @@ quantitative error figures from the experiments are reported where available.
     Method & Non-negativity & Handles missing entries & Reconstruction error \\
     \midrule
     ALS              & No (\,$\approx34\%$ negative\,) & No   & $51.23\%$ \\
-    NMF              & Yes                              & No   & --- \\
+    NMF              & Yes                              & No   & $\approx 10\%$ \\
     WNMF (binary $W$) & Yes                             & Yes  & $\approx 0$ \\
     \bottomrule
   \end{tabular}

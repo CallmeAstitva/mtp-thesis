@@ -4,4 +4,97 @@
 \chapter{Conclusion}
 \label{ch:conclusion}
 
-\textit{[Conclusion to be written once chapters are finalised.]}
+This thesis approached item-to-item recommendation for IndiaMART from three
+directions --- a factorized $K$-step Markov chain, a position-bias correction,
+and a learned embedding space --- each measured against the same demanding
+yardstick, the production frequency-based model with backfilling. This closing
+chapter draws the findings together and points to where the work can be taken
+next.
+
+\section{Summary of Findings}
+\label{sec:concl-summary}
+
+\paragraph{Matrix factorization for the $K$-step Markov recommender.}
+Modelling navigation as a Markov chain and reading recommendations from the
+powers of its transition matrix is attractive, but the powers are infeasible to
+form at catalogue scale. Expressing them through a low-rank factorization reduces
+the memory required for higher-order transitions from petabytes to tens of
+gigabytes. The saving is real, yet it does not buy recommendation quality:
+across subcategories the factorized recommendations trailed both the raw
+transition matrix and the production baseline, the gap widening as the transition
+order grew and reconstruction error accumulated, and a self-transition term did
+not close it. Weighted NMF, which fits only the observed entries, was found to
+have a structural weakness --- its unconstrained, unobserved entries inflate and
+come to dominate the Markov chain --- that a near-zero reconstruction error on
+observed entries conceals rather than resolves.
+
+\paragraph{Position-bias estimation and correction.}
+Raw click logs conflate relevance with presentation, and the effect is plainly
+visible in the IndiaMART data, where clicks fall monotonically with rank. Under
+the examination hypothesis, position bias was estimated by three independent
+routes --- perfect-exposure aggregation, anchoring to external search sources,
+and a controlled A/B experiment --- which agreed qualitatively and confirmed the
+strong advantage of the top positions. Folding the correction into the existing
+$K$-step engine as per-transition-type weights, with no change to the engine
+itself, raised click-through rate by roughly $3.5$ to $4$ percentage points
+consistently on held-out weeks. Of the three lines of work, this correction gave
+the clearest and most direct improvement.
+
+\paragraph{Embedding-based recommendation.}
+A hierarchical cosine-softmax model learned a dense embedding per product,
+cold-started from text metadata and refined from interactions, and served it
+through approximate nearest-neighbour search at full catalogue scale. The
+interaction training added clear signal over a content-only baseline, but the
+learned embeddings did not overtake the frequency-based incumbent with
+backfilling. The most striking result was diagnostic rather than absolute: the
+training objective proved an unreliable guide to recommendation quality. Random
+initialisation reached a lower loss than text initialisation yet recommended
+worse, and on the industry subset the flat objective beat the hierarchical one on
+loss while losing to it, and degrading, on click-through rate.
+
+\paragraph{A cross-cutting lesson.}
+The same caution recurred in two of the three lines of work: driving down an
+offline optimisation metric --- reconstruction error or negative log-likelihood
+--- did not reliably improve, and sometimes worsened, the recommendations
+actually produced. The simple frequency-based model with backfilling remained a
+strong baseline throughout. Taken together, these results argue for evaluating
+recommendation methods on recommendation quality directly, and for treating a
+lower training loss as, at best, a hypothesis to be checked rather than a result
+in itself.
+
+\section{Limitations and Future Work}
+\label{sec:concl-future}
+
+Several directions follow naturally from this work.
+
+\begin{itemize}
+  \item \textbf{Controlling the unobserved entries in weighted NMF.} The
+        limitation identified in Chapter~\ref{ch:markov-factorization} points to
+        factorizations that regularise or otherwise constrain the reconstruction
+        away from the observed support, so that the reconstructed matrix remains a
+        well-behaved transition operator everywhere rather than only where data
+        was seen.
+  \item \textbf{Refreshing the assumed recommendations for bias evaluation.} The
+        bootstrapping diagnostic of Chapter~\ref{ch:position-bias} showed the
+        assumed recommendation lists drifting out of date as they saturate, with
+        mismatches rising over time. Periodically refreshing them, and evaluating
+        the effect of that refresh, is a concrete next step.
+  \item \textbf{Closing the gap to the frequency baseline for embeddings.} The
+        embedding model beats the content-only baseline but not the frequency
+        incumbent. Combining the learned embeddings with the frequency signal, and
+        applying the position-bias correction to the interaction weights that
+        train them, are promising ways to combine the strengths of the three lines
+        of work rather than treating them separately.
+  \item \textbf{Broader experimental coverage.} The factorization experiments
+        reported here are at subcategory scale; extending them, and the embedding
+        evaluation, across more of the catalogue --- and to industry-level
+        aggregations --- would sharpen the picture of where each method helps.
+\end{itemize}
+
+The unifying message of the thesis is that, in a marketplace of this scale and
+sparsity, the value of a method is decided at the point of recommendation, not at
+the point of optimisation. The position-bias correction succeeded because it
+improved the signal the recommender actually consumes; the factorization and
+embedding approaches, for all their formal appeal, were held back by the gap
+between what they optimised and what they were meant to deliver. Narrowing that
+gap is the thread that ties the future directions above together.

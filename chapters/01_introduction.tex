@@ -1,12 +1,135 @@
 %==============================================================
-%  Chapter 1  --  Introduction  (WRITE LAST, with the abstract)
+%  Chapter 1  --  Introduction
 %==============================================================
 \chapter{Introduction}
 \label{ch:introduction}
 
-% Scaffold only. The introduction promises the arc the later chapters
-% deliver, so it is written once the spine is final.
-\textit{[Introduction to be written once chapters are finalised.]}
+Recommendation systems have become central to how users navigate large online
+catalogues. On a marketplace with millions of items, no user can browse more than
+a vanishing fraction of what is on offer, and the quality of the paths a platform
+suggests --- ``users who viewed this also viewed'' and related item-to-item
+surfaces --- largely determines how quickly a buyer reaches something relevant.
+This thesis studies recommendation for IndiaMART, one of India's largest
+business-to-business (B2B) marketplaces, where the task is to recommend products
+given a product a user is currently looking at.
+
+\section{Motivation and Setting}
+\label{sec:intro-setting}
+
+The IndiaMART setting brings together, in an acute form, the difficulties that
+make industrial recommendation hard. The catalogue is enormous --- of the order
+of tens of millions of live products spread across thousands of categories --- so
+any method must scale to matrices and index structures with tens of millions of
+rows. The interaction data is extremely \emph{sparse}: the vast majority of
+product pairs are never seen together in a session, and the product-to-product
+transition matrix has a density on the order of $10^{-4}$. The feedback is
+entirely \emph{implicit} --- clicks, impressions, and downstream conversion
+events collected from ordinary browsing, with no explicit ratings --- so the
+signal is noisy and shaped by how items were presented. And the catalogue turns
+over constantly, which keeps the \emph{cold-start} problem ever-present: newly
+listed and long-tail products have little or no interaction history from which to
+learn.
+
+Against this backdrop, the incumbent production recommender is a simple but
+strong frequency-based model (FBM): a product-to-product transition matrix built
+from co-occurrence counts, row-normalised, and topped up through a
+\emph{backfilling} step that fills empty recommendation slots with the platform's
+pre-existing recommendations. This baseline is the yardstick used throughout the
+thesis. It sets a deliberately high bar: a new method is only worth deploying if
+it improves on the production system, not merely on some intermediate offline
+metric. Much of what follows is a study of where richer models help against this
+baseline, where they do not, and --- importantly --- why offline improvements do
+not always translate into better recommendations.
+
+\section{Approaches Studied}
+\label{sec:intro-approaches}
+
+The thesis develops three complementary lines of work.
+
+\begin{itemize}
+  \item \textbf{A $K$-step Markov-chain recommender via matrix factorization
+        (Chapter~\ref{ch:markov-factorization}).} Product navigation is modelled
+        as a Markov chain, and multi-hop recommendations are obtained from the
+        powers of its transition matrix. Because those powers are infeasible to
+        materialise at catalogue scale, they are expressed through a low-rank
+        factorization, and several factorization schemes (ALS, NMF, and
+        weighted NMF) are examined against the non-negativity and sparsity of the
+        problem. The chapter reports both what the factorization saves and where
+        it falls short of the frequency baseline.
+  \item \textbf{Position-bias estimation and correction
+        (Chapter~\ref{ch:position-bias}).} Because recommendations are consumed
+        as ranked lists, raw clicks confound relevance with presentation: items
+        shown near the top are clicked more simply for being shown near the top.
+        This line of work models that distortion, estimates it from data through
+        several independent routes, and folds the correction back into the
+        recommendation engine as transition weights.
+  \item \textbf{An embedding-based item-to-item model
+        (Chapter~\ref{ch:embedding}).} Every product is given a dense embedding
+        that is cold-started from its text metadata and then refined from observed
+        interactions through a hierarchical cosine-softmax objective, so that
+        content and collaborative signals are combined in a single vector space
+        searched by approximate nearest neighbours. The chapter studies the
+        model's training behaviour and, separately, its recommendation quality.
+\end{itemize}
 
 \section*{Key Contributions}
-% TODO: bullet the contributions once derived from the decks.
+\addcontentsline{toc}{section}{Key Contributions}
+
+The principal contributions of this thesis are the following.
+
+\begin{enumerate}
+  \item \textbf{A method for estimating and correcting position bias in the
+        IndiaMART recommendation logs.} Adopting the examination hypothesis, the
+        position bias is estimated by three independent routes --- a
+        perfect-exposure aggregation, an anchoring of on-platform ranks to
+        external traffic sources (Google and IndiaMART search), and a controlled
+        A/B shifted-list experiment --- which agree qualitatively and thereby
+        lend confidence to the estimate. The correction is integrated into the
+        existing $K$-step recommender as per-transition-type weights, requiring no
+        change to the engine itself. On held-out evaluation weeks this
+        bias-weighted recommender improves click-through rate by roughly $3.5$ to
+        $4$ percentage points consistently over the unweighted model.
+  \item \textbf{An embedding-based item-to-item recommender that unifies content
+        and collaborative signals at full catalogue scale.} A hierarchical
+        cosine-softmax objective factorises the probability of a transition along
+        the category taxonomy, making the softmax tractable over a catalogue of
+        more than twenty million products; product embeddings are initialised from
+        text metadata and refined from interactions; and the learned space is
+        served through approximate nearest-neighbour search. Beyond the model
+        itself, the chapter contributes a careful evaluation showing that the
+        interaction training adds real signal over a content-only baseline, and a
+        cautionary finding that the training objective can move opposite to
+        recommendation quality.
+  \item \textbf{An analysis of matrix-factorization approaches to the $K$-step
+        Markov recommender, and their limitations.} The factorized formulation
+        yields large memory savings for higher-order transitions, but an
+        empirical evaluation shows that it does not preserve recommendation
+        quality relative to the raw transition matrix or the production baseline,
+        and a structural limitation of weighted NMF --- unconstrained,
+        unobserved entries that inflate and dominate the Markov chain --- is
+        identified.
+  \item \textbf{A cross-cutting, practically important observation:} offline
+        optimisation metrics --- reconstruction error for the factorization,
+        negative log-likelihood for the embedding model --- are unreliable
+        proxies for recommendation quality in this setting, and the simple
+        frequency-based model with backfilling remains a strong baseline that the
+        richer models studied here do not uniformly surpass.
+\end{enumerate}
+
+\section{Organisation of the Thesis}
+\label{sec:intro-organization}
+
+The remainder of the thesis is organised as follows.
+Chapter~\ref{ch:datasets} describes the datasets --- the click-stream logs, the
+transition data derived from them, and the product catalogue --- together with
+the preprocessing common to all later chapters.
+Chapter~\ref{ch:markov-factorization} develops the $K$-step Markov-chain
+recommender and its matrix-factorization formulation, and evaluates the
+factorization against the frequency baseline.
+Chapter~\ref{ch:position-bias} takes up position bias: its modelling,
+estimation, and correction, and the integration of that correction into the
+recommendation engine.
+Chapter~\ref{ch:embedding} presents the embedding-based item-to-item model, its
+implementation at scale, and its recommendation-quality evaluation.
+Chapter~\ref{ch:conclusion} concludes, drawing together the findings and
+outlining directions for further work.

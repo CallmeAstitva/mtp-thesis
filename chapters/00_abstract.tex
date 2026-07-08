@@ -1,10 +1,35 @@
 %==============================================================
-%  Abstract  --  WRITE LAST, once the chapter spine is final.
+%  Abstract
 %==============================================================
 \chapter*{Abstract}
 \addcontentsline{toc}{chapter}{Abstract}
 
-% TODO: 1-2 paragraphs summarising problem, approach, and results.
-% Deliberately left as a scaffold: the abstract is written near the end,
-% after the decks have defined the actual technical contributions.
-\textit{[Abstract to be written once chapters are finalised.]}
+This thesis studies item-to-item recommendation for IndiaMART, a large
+business-to-business marketplace whose catalogue spans tens of millions of
+products. The setting is defined by scale, extreme sparsity of the
+product-to-product interaction data, purely implicit feedback, and a persistent
+cold-start problem, against an incumbent production recommender --- a simple
+frequency-based model with backfilling --- that is a deliberately strong
+baseline. Three complementary lines of work are developed. First, product
+navigation is modelled as a $K$-step Markov chain whose higher-order transitions
+are computed through a low-rank matrix factorization; this saves several orders
+of magnitude in memory, but an empirical evaluation shows that the factorization
+does not preserve recommendation quality relative to the raw transition matrix or
+the production baseline, and a structural limitation of weighted non-negative
+matrix factorization is identified. Second, position bias --- the tendency of
+users to click higher-ranked items regardless of relevance --- is modelled under
+the examination hypothesis and estimated by three independent routes that agree
+qualitatively; correcting for it by re-weighting transitions in the existing
+recommendation engine improves click-through rate by roughly $3.5$ to $4$
+percentage points consistently on held-out weeks. Third, a hierarchical
+cosine-softmax embedding model is developed that cold-starts product embeddings
+from text metadata and refines them from interactions, combining content and
+collaborative signals in a single vector space searched by approximate nearest
+neighbours at full catalogue scale; the interaction training adds clear signal
+over a content-only baseline, though the model does not overtake the
+frequency-based incumbent. A theme runs through all three: offline optimisation
+metrics --- reconstruction error and negative log-likelihood --- are unreliable
+proxies for recommendation quality, and in two cases the training objective and
+the click-through rate move in opposite directions. The thesis reports these
+findings together with the estimation methods, scaling techniques, and
+evaluations that produced them.

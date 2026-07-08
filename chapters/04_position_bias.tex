@@ -50,11 +50,7 @@ canonical signature of position bias.
 
 \begin{figure}[ht]
   \centering
-  % \includegraphics[width=0.85\textwidth]{figures/clicks_by_position.png}
-  \fbox{\parbox[c][3.5cm][c]{0.85\textwidth}{\centering\itshape
-    [Figure to be inserted] Distribution of clicks by clicked
-    recommendation position (modid=IM): clicks decay monotonically from
-    rank~1 ($\approx 7.4$k) to rank~6 ($\approx 4.3$k).}}
+  \includegraphics[width=0.85\textwidth]{figures/position-clicks.png}
   \caption{Observed clicks by position. The monotone decline with rank is
            direct evidence of position bias.}
   \label{fig:pb-clicks}
@@ -200,11 +196,7 @@ ones for the same underlying relevance.
 
 \begin{figure}[ht]
   \centering
-  % \includegraphics[width=0.85\textwidth]{figures/pos1_vs_others.png}
-  \fbox{\parbox[c][3.5cm][c]{0.85\textwidth}{\centering\itshape
-    [Figure to be inserted] Weekly normalised positional performance vs.\
-    position~1 (top 25\% by volume): effectiveness ratio $\pi_1/\pi_i$ for
-    $i\in\{2,3,4,5\}$ across Jul~2024--May~2025.}}
+  \includegraphics[width=0.85\textwidth]{figures/pos1vsothers.png}
   \caption{Effectiveness ratio of position~1 against lower positions. Ratios
            above~1, increasing with rank, quantify the advantage of the top
            slot.}
@@ -223,10 +215,7 @@ than an artefact of any single reference source.
 
 \begin{figure}[ht]
   \centering
-  % \includegraphics[width=0.85\textwidth]{figures/adjusted_cg_ratio.png}
-  \fbox{\parbox[c][3.5cm][c]{0.85\textwidth}{\centering\itshape
-    [Figure to be inserted] Weekly adjusted quality ratio per position with
-    Google search as the reference anchor (CG), top 25\% by volume.}}
+  \includegraphics[width=0.85\textwidth]{figures/cg_pos.png}
   \caption{Position bias anchored to Google search. Search view counts are
            scaled to the transition view volume before forming the ratios.}
   \label{fig:pb-cg}
@@ -234,10 +223,7 @@ than an artefact of any single reference source.
 
 \begin{figure}[ht]
   \centering
-  % \includegraphics[width=0.85\textwidth]{figures/adjusted_cim_ratio.png}
-  \fbox{\parbox[c][3.5cm][c]{0.85\textwidth}{\centering\itshape
-    [Figure to be inserted] Weekly adjusted quality ratio per position with
-    IndiaMART search as the reference anchor (CIM), top 25\% by volume.}}
+  \includegraphics[width=0.85\textwidth]{figures/cim_pos.png}
   \caption{Position bias anchored to IndiaMART search, as a cross-check on the
            Google-anchored estimate of Figure~\ref{fig:pb-cg}.}
   \label{fig:pb-cim}
@@ -314,11 +300,7 @@ separately.
 
 \begin{figure}[ht]
   \centering
-  % \includegraphics[width=0.9\textwidth]{figures/mismatches.png}
-  \fbox{\parbox[c][3.5cm][c]{0.9\textwidth}{\centering\itshape
-    [Figure to be inserted] Daily mismatch \% (rising $0\to40\%$) against
-    aggregate newly-found \% (falling $85\to25\%$) over Jul~2024--May~2025,
-    top 25\% by volume.}}
+  \includegraphics[width=0.9\textwidth]{figures/pb-mismatch.png}
   \caption{Bootstrapping diagnostic for the assumed recommendations. As lists
            saturate, newly-found interactions decline and mismatches grow,
            motivating periodic refresh.}
