@@ -1,7 +1,5 @@
 %==============================================================
-%  Chapter 2 -- Scalable K-Step Markov-Chain Recommendation
-%                via Matrix Factorization
-%  Source: Semester-1 mid-term deck (Matrix Factorization).
+%  Scalable K-Step Markov-Chain Recommendation via Matrix Factorization
 %==============================================================
 \chapter{Scalable \texorpdfstring{$K$}{K}-Step Markov-Chain Recommendation via Matrix Factorization}
 \label{ch:markov-factorization}
@@ -136,7 +134,7 @@ recommendation row $\bigl[M^{K}\bigr]_{i,\cdot}
 materialising the full $N \times N$ result.
 
 \begin{remark}
-The mid-term presentation wrote the relation compactly as
+The relation is sometimes written compactly as
 $M^{k} = U\,(W^{k})\,V^{\top}$. The exact algebra in
 \eqref{eq:factored-power} gives the exponent $k-1$ rather than $k$, since one
 factor of $V^{\top}U$ is consumed by the outer $U$ and $V^{\top}$. The
@@ -328,9 +326,8 @@ the conventional choice, breaks on the non-negativity requirement intrinsic to
 a probability matrix. NMF restores non-negativity but still tries to fit the
 structural zeros of a $10^{-4}$-dense matrix. Binary-weighted NMF addresses
 both issues at once and drives the error on the observed entries almost to
-zero, which is why it was adopted as the working method at the end of the
-mid-term stage. The closer evaluation carried out subsequently, however, told a
-less flattering story on two fronts. Empirically, recommendations generated from
+zero, which is why it was adopted as the working method. A closer evaluation,
+however, told a less flattering story on two fronts. Empirically, recommendations generated from
 the factorized matrix did not match the incumbent frequency baseline
 (Section~\ref{sec:mf-ctr}); and structurally, the near-zero error figure was
 found to conceal a serious failure mode (Section~\ref{sec:wnmf-limit}). The next
@@ -676,5 +673,5 @@ reconstruction) that is not aligned with the quantity that actually matters for
 recommendation (the behaviour of the \emph{full} reconstructed matrix under
 repeated multiplication). Controlling the unobserved entries --- so that the
 reconstruction remains a well-behaved transition operator everywhere, not only
-where data was seen --- is the open problem that this work carries into the
-next stage.
+where data was seen --- remains an open problem that this factorization-based
+approach does not resolve.

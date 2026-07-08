@@ -1,12 +1,5 @@
 %==============================================================
-%  Chapter 4 -- Embedding-Based Item-to-Item Recommendation
-%  Sources: "Hierarchical Cosine-Softmax Objective for Product
-%  Embeddings" (spec) and "hierarchical_embedding_experiments"
-%  (as-built + experiments). Both are the user's own work.
-%
-%  NOTE: all reported numbers are TRAINING-OBJECTIVE results
-%  (weighted NLL). Recommendation-quality (offline CTR) evaluation
-%  is out of scope for this chapter and stated as such.
+%  Embedding-Based Item-to-Item Recommendation
 %==============================================================
 \chapter{Embedding-Based Item-to-Item Recommendation}
 \label{ch:embedding}
@@ -19,10 +12,10 @@ recommendations by nearest-neighbour search in that space. The construction is
 at once content-based and collaborative --- embeddings are \emph{cold-started}
 from product text metadata and then \emph{refined} from observed item-to-item
 interactions --- and it is organised around the product category hierarchy. We
-present the model as originally specified (a hierarchical cosine-softmax
-objective), the extensions made during development (trainable centroids and a
-flat alternative), the implementation as actually built, and a sequence of
-controlled training experiments together with what they reveal.
+present the model itself (a hierarchical cosine-softmax objective), two
+extensions to it (trainable centroids and a flat alternative), its
+implementation, and a sequence of controlled training experiments together with
+what they reveal.
 
 A note on scope frames the chapter. The experiments of
 Section~\ref{sec:emb-experiments} and the findings drawn from them
@@ -198,12 +191,14 @@ S$, $m\in M(S_j)$, and $k\in P_{M_j}$ respectively. The gradient of the
 per-sample loss with respect to the \emph{source-role} occurrence of $e_i$ is
 \begin{equation}
   \label{eq:emb-grad-ei}
+  \begin{aligned}
   \frac{\partial\ell(i,j)}{\partial e_i}
-    = \Big(\sum_{s\in S} p_{\text{sub}}(s\mid i)\,c^{(\text{sub})}_{s}
+    &= \Big(\sum_{s\in S} p_{\text{sub}}(s\mid i)\,c^{(\text{sub})}_{s}
            - c^{(\text{sub})}_{S_j}\Big)
-    + \Big(\sum_{m\in M(S_j)} p_{\text{mcat}}(m\mid i,S_j)\,c^{(\text{mcat})}_{m}
-           - c^{(\text{mcat})}_{M_j}\Big)
-    + \Big(\sum_{k\in P_{M_j}} p_{\text{prod}}(k\mid i,M_j)\,e_k - e_j\Big),
+     + \Big(\sum_{m\in M(S_j)} p_{\text{mcat}}(m\mid i,S_j)\,c^{(\text{mcat})}_{m}
+           - c^{(\text{mcat})}_{M_j}\Big) \\
+    &\quad + \Big(\sum_{k\in P_{M_j}} p_{\text{prod}}(k\mid i,M_j)\,e_k - e_j\Big),
+  \end{aligned}
 \end{equation}
 and for a \emph{target-role} occurrence $e_k$ with $k\in P_{M_j}$,
 \begin{equation}
@@ -457,9 +452,10 @@ flat objective under identical data, initialisation, and learning rate.
 \end{table}
 
 The gap is stark. The hierarchical subset run moved avg/pair by only $0.030$
-over $50$ epochs ($13.234\to 13.204$), whereas the flat run moved it by $0.300$
-over $30$ epochs ($12.654\to 12.354$) --- with the epoch-1 flat loss already
-below the hierarchical run's converged value. At convergence the flat model
+over $50$ epochs, from an epoch-1 value of $13.234$ to the converged $13.204$ of
+Table~\ref{tab:emb-furniture}, whereas the flat run moved it by $0.300$ over $30$
+epochs, from $12.654$ to $12.354$ --- with the epoch-1 flat loss already below
+the hierarchical run's converged value. At convergence the flat model
 sits roughly one nat below the uniform-random baseline of
 $\log(608{,}287)\approx 13.32$.
 

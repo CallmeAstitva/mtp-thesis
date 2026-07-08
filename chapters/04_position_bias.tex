@@ -1,10 +1,5 @@
 %==============================================================
-%  Chapter 3 -- Position Bias: Estimation and Correction
-%  Source: Semester-2 mid-term deck (position-bias pages only;
-%  two-stage model, its CTR tables, and the live-eval table are
-%  intentionally excluded). The K-step recommender is introduced
-%  only briefly, as the existing engine into which the estimated
-%  bias is integrated.
+%  Position Bias: Estimation and Correction
 %==============================================================
 \chapter{Position Bias: Estimation and Correction}
 \label{ch:position-bias}
@@ -295,8 +290,8 @@ because the assumed recommendation lists are still largely empty. As the lists
 saturate, the newly-found fraction falls (towards $25\%$) while the daily
 mismatch fraction rises (from near zero towards $40\%$). The growing mismatch is
 expected under a \emph{static} set of assumed recommendations and motivates
-refreshing them periodically; those refresh experiments are reported
-separately.
+refreshing them periodically, a direction taken up as future work
+(Chapter~\ref{ch:conclusion}).
 
 \begin{figure}[ht]
   \centering
