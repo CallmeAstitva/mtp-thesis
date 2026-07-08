@@ -77,6 +77,31 @@ text-based embeddings are retained in the final retrieval space. The hierarchy
 is thus used during \emph{training} as a structured objective, not for online
 inference.
 
+\subsection{Content-Based Product Vectors}
+\label{sec:emb-content-init}
+The initial embedding of every product is built from its catalogue metadata in
+the product description dataset (Section~\ref{sec:product-desc}). For each
+catalogue entry a single text document is assembled by concatenating the product
+name, its master category, general category, highest-level product group, and
+primary product category, together with the product specifications. The
+specifications, held as JSON in the \texttt{custom\_specs\_json} field, are
+flattened into text as a list of attribute--value pairs, which keeps their
+content while making them readable by a text encoder. The result is one document
+per product that combines the product's identity, its place in the category
+hierarchy, and its detailed specifications.
+
+Each document is encoded with the \texttt{all-MiniLM-L6-v2} sentence-transformer,
+which maps a variable-length text to a $384$-dimensional dense vector in a shared
+semantic space; this is where $d=384$ throughout the chapter comes from. Products
+with similar descriptions are placed near one another, so these vectors carry
+content similarity even when interaction data is sparse or absent --- the
+cold-start signal the model starts from. Because the catalogue metadata does not
+change during training, the vectors are computed once during preprocessing and
+stored. Both the interaction training that follows and the content-baseline of
+Section~\ref{sec:emb-baselines} read these precomputed vectors rather than
+re-encoding the raw metadata, which keeps the product representations consistent
+across experiments and avoids repeated encoding cost.
+
 %--------------------------------------------------------------
 \section{The Hierarchical Cosine-Softmax Objective}
 \label{sec:emb-model}
@@ -526,11 +551,12 @@ cities).
 
 \subsection{Baselines}
 \label{sec:emb-baselines}
-Three baselines are used. The \emph{Frequency-Based Model} (FBM) is the
-incumbent frequency/co-occurrence recommender: an $n\times n$ matrix over
-products in which entry $m_{ij}$ is the number of observed transitions from
-product $i$ to product $j$, with each row normalised to sum to one.
-\emph{Backfilling} is a coverage mechanism layered on top --- for a product with
+Three baselines are used. The \emph{Frequency-Based Model} (FBM), already used as
+the production baseline in Section~\ref{sec:mf-ctr-setup}, is the incumbent
+frequency/co-occurrence recommender: an $n\times n$ matrix over products in which
+entry $m_{ij}$ is the number of observed transitions from product $i$ to product
+$j$, with each row normalised to sum to one. \emph{Backfilling}
+(Section~\ref{sec:mf-ctr-setup}) is a coverage mechanism layered on top --- for a product with
 fewer than $k$ recommendations, or with recommendation scores below a
 threshold, the remaining slots are filled with IndiaMART's pre-existing
 recommendations. FBM is therefore reported both \emph{without} and \emph{with}

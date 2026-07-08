@@ -339,9 +339,310 @@ a probability matrix. NMF restores non-negativity but still tries to fit the
 structural zeros of a $10^{-4}$-dense matrix. Binary-weighted NMF addresses
 both issues at once and drives the error on the observed entries almost to
 zero, which is why it was adopted as the working method at the end of the
-mid-term stage. The closer evaluation carried out subsequently, however,
-revealed that this near-zero error figure conceals a serious failure mode. The
-next section examines it.
+mid-term stage. The closer evaluation carried out subsequently, however, told a
+less flattering story on two fronts. Empirically, recommendations generated from
+the factorized matrix did not match the incumbent frequency baseline
+(Section~\ref{sec:mf-ctr}); and structurally, the near-zero error figure was
+found to conceal a serious failure mode (Section~\ref{sec:wnmf-limit}). The next
+two sections take these in turn.
+
+%--------------------------------------------------------------
+\section{Recommendation-Quality Evaluation of the Factorization}
+\label{sec:mf-ctr}
+
+The reconstruction error of Section~\ref{sec:mf-results} measures how faithfully
+the factors reproduce the \emph{observed} transitions. It says nothing directly
+about the quality of the recommendations produced from the factorized matrix.
+This section closes that gap: it evaluates the non-negative factorization ---
+optimised over the observed transitions as in Section~\ref{sec:wnmf} --- on the
+task it is actually meant for, ranking next products, and compares it against the
+production frequency baseline. Three questions are asked in turn. Does the
+factorized matrix recommend as well as the raw transition matrix and the
+production model? Does the factorized representation preserve quality when it is
+used for its intended purpose, cheap higher-order transitions? And does adding a
+self-transition term to the matrix help the factorization close the gap?
+
+\subsection{Evaluation Setup}
+\label{sec:mf-ctr-setup}
+
+\paragraph{Subcategory-wise factorization.}
+Factorising the complete transition matrix was not feasible within the available
+hardware. At the scale of Section~\ref{sec:mf-problem}, storing the factors and
+optimising the reconstruction objective across the full catalogue --- and doing
+so repeatedly while sweeping factorization ranks --- exceeded the memory budget.
+The evaluation was therefore carried out one product subcategory at a time. For
+each selected subcategory a row-normalised transition probability matrix was
+built using only the products belonging to that subcategory. These per-%
+subcategory matrices are far smaller than the global matrix while preserving the
+transition structure within their product domain, which makes it possible to
+assess both reconstruction quality and its effect on recommendations without the
+memory obstacle.
+
+\paragraph{Recommendation generation.}
+Recommendations were read off the reconstructed transition matrix by taking, for
+each source product, the products with the highest transition probability in its
+row. The top~$20$ such products were kept as the candidate recommendations for
+that source.
+
+\paragraph{Backfilling.}
+In practice not every product had a full list of twenty recommendations once its
+transition probabilities were ranked. To keep every list at exactly twenty
+items, any empty slots were filled with the recommendations already produced by
+IndiaMART's existing production system --- a \emph{backfilling} step. This keeps
+the list length uniform across methods and keeps the output compatible with the
+production pipeline. Backfilling recurs as a baseline component in later chapters
+(see Section~\ref{sec:emb-baselines}).
+
+\paragraph{Baseline.}
+The comparison point is the \emph{Frequency-Based Model} (FBM), the production
+recommender. FBM ranks candidates directly by the transition probabilities of
+the (row-normalised) transition matrix, with no factorization: the products with
+the highest observed transition probability are recommended first. The specific
+production version appearing in the tables below is denoted FBM~v1.5.1.
+
+\paragraph{Metric.}
+Recommendation quality is measured by click-through rate (CTR), the fraction of
+recommended products that users clicked after being shown them. CTR is reported
+separately for the IndiaMART website (IM) and the IndiaMART mobile platform
+(IMOB).
+
+\subsection{Factorization versus the Transition Matrix and FBM}
+\label{sec:mf-ctr-subcat}
+
+Table~\ref{tab:mf-ctr-subcat} compares three recommenders across six
+subcategories: recommendations from the NMF-reconstructed matrix, recommendations
+from the raw transition matrix with backfilling, and the production FBM.
+
+\begin{table}[ht]
+  \centering
+  \caption{CTR (\%) by subcategory: NMF reconstruction versus the raw transition
+           matrix with backfilling versus the production FBM~v1.5.1.}
+  \label{tab:mf-ctr-subcat}
+  \small
+  \begin{tabular}{lcccccc}
+    \toprule
+    & \multicolumn{2}{c}{NMF} & \multicolumn{2}{c}{Transition + backfilling}
+    & \multicolumn{2}{c}{FBM v1.5.1} \\
+    \cmidrule(lr){2-3}\cmidrule(lr){4-5}\cmidrule(lr){6-7}
+    Subcat & IM & IMOB & IM & IMOB & IM & IMOB \\
+    \midrule
+    9   & $8.52$ & $11.73$ & $14.30$ & $16.33$ & $14.41$ & $15.31$ \\
+    22  & $9.55$ & $15.52$ & $12.73$ & $19.34$ & $14.28$ & $19.95$ \\
+    144 & $5.28$ & $7.46$  & $12.41$ & $15.32$ & $9.46$  & $11.44$ \\
+    407 & $7.62$ & $8.78$  & $11.61$ & $13.72$ & $10.05$ & $13.89$ \\
+    487 & $5.32$ & $9.83$  & $11.11$ & $17.97$ & $10.18$ & $18.35$ \\
+    799 & $6.53$ & $10.57$ & $12.72$ & $15.50$ & $11.59$ & $15.80$ \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+The pattern is the same in every subcategory. The NMF reconstruction produces the
+lowest CTR of the three, on both surfaces, without exception. Recommendations
+taken directly from the transition matrix with backfilling, by contrast, are
+roughly on par with the production system --- comparable to, and in several
+subcategories slightly above, FBM~v1.5.1. The exact transition probabilities
+therefore carry more useful signal than their low-rank approximation does. A
+plausible reason is that the transition matrix is extremely sparse and its useful
+structure is highly localised: a rank-$r$ non-negative factorization compresses
+the matrix aggressively, and the approximation smooths away precisely the sharp,
+product-specific transitions that a good next-product recommendation depends on.
+
+\subsection{Higher-Order Transitions With and Without Factorization}
+\label{sec:mf-ctr-higher}
+
+The comparison above evaluates the factorization only through its first-order
+reconstruction. But reconstructing the matrix was never the point; the reason for
+factorising at all (Section~\ref{sec:mf-solution}) was to compute higher-order
+transitions cheaply, using the factored-power identity~\eqref{eq:factored-power}
+in which the expensive part reduces to powering the small $r\times r$ core. The
+question is whether recommendations built from those factorized higher-order
+transitions hold up against the same transitions computed by directly powering
+the raw matrix.
+
+For each subcategory two pipelines were run for exponents $k\in\{1,2,3,4,5\}$: in
+the first the raw transition matrix was repeatedly multiplied to form $M^{k}$; in
+the second the matrix was factorised and the higher-order transitions were
+obtained through the low-rank representation. In both cases recommendations were
+generated by ranking each row of the resulting matrix, and CTR was measured on
+both surfaces. Table~\ref{tab:mf-ctr-higher} collects the results.
+
+\begin{table}[ht]
+  \centering
+  \caption{Higher-order transition CTR (\%) without and with factorization, by
+           subcategory and transition exponent $k$.}
+  \label{tab:mf-ctr-higher}
+  \small
+  \begin{tabular}{clcccc}
+    \toprule
+    & & \multicolumn{2}{c}{Without factorization}
+      & \multicolumn{2}{c}{With factorization} \\
+    \cmidrule(lr){3-4}\cmidrule(lr){5-6}
+    Subcat & $k$ & IM & IMOB & IM & IMOB \\
+    \midrule
+    \multirow{5}{*}{9}
+      & 1 & $7.11$ & $10.63$ & $8.52$ & $11.13$ \\
+      & 2 & $6.52$ & $9.15$  & $6.07$ & $9.46$ \\
+      & 3 & $7.26$ & $12.02$ & $8.30$ & $12.23$ \\
+      & 4 & $6.96$ & $10.46$ & $6.96$ & $10.27$ \\
+      & 5 & $7.85$ & $11.40$ & $7.41$ & $10.89$ \\
+    \midrule
+    \multirow{5}{*}{22}
+      & 1 & $8.89$  & $15.25$ & $9.55$  & $14.99$ \\
+      & 2 & $9.21$  & $14.40$ & $8.25$  & $13.85$ \\
+      & 3 & $10.79$ & $16.60$ & $10.16$ & $14.45$ \\
+      & 4 & $8.57$  & $13.99$ & $8.57$  & $11.48$ \\
+      & 5 & $8.57$  & $13.00$ & $6.67$  & $10.19$ \\
+    \midrule
+    \multirow{5}{*}{144}
+      & 1 & $4.19$ & $6.90$ & $5.28$ & $7.23$ \\
+      & 2 & $4.42$ & $6.06$ & $3.95$ & $6.38$ \\
+      & 3 & $6.05$ & $8.20$ & $6.05$ & $8.24$ \\
+      & 4 & $6.28$ & $6.18$ & $6.28$ & $6.66$ \\
+      & 5 & $5.58$ & $7.83$ & $5.35$ & $7.27$ \\
+    \midrule
+    \multirow{5}{*}{407}
+      & 1 & $5.38$ & $8.02$ & $7.62$ & $8.24$ \\
+      & 2 & $6.05$ & $6.67$ & $5.55$ & $6.98$ \\
+      & 3 & $7.35$ & $9.56$ & $6.39$ & $8.83$ \\
+      & 4 & $5.88$ & $8.02$ & $5.71$ & $7.47$ \\
+      & 5 & $7.06$ & $9.34$ & $5.55$ & $8.22$ \\
+    \midrule
+    \multirow{5}{*}{487}
+      & 1 & $4.29$ & $7.16$ & $5.32$ & $9.26$ \\
+      & 2 & $3.06$ & $6.82$ & $3.98$ & $7.35$ \\
+      & 3 & $5.97$ & $8.97$ & $6.74$ & $9.02$ \\
+      & 4 & $4.44$ & $8.35$ & $5.05$ & $8.44$ \\
+      & 5 & $6.89$ & $9.06$ & $6.28$ & $9.02$ \\
+    \midrule
+    \multirow{5}{*}{799}
+      & 1 & $5.81$ & $10.81$ & $6.53$ & $11.42$ \\
+      & 2 & $6.59$ & $10.29$ & $6.82$ & $10.19$ \\
+      & 3 & $7.82$ & $12.33$ & $8.16$ & $11.78$ \\
+      & 4 & $7.15$ & $11.62$ & $7.49$ & $11.10$ \\
+      & 5 & $7.82$ & $11.65$ & $7.60$ & $10.58$ \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+Two things emerge. At the first order ($k=1$) the factorized representation is
+competitive, and in several subcategories (9, 144, 407, 487, 799) it is even a
+little ahead of the raw matrix --- confirming that the approximation captures the
+dominant direct transitions with only small error. As the exponent grows,
+however, the factorized results become erratic. In subcategories such as 22 and
+407 the raw matrix pulls clearly ahead at larger $k$, while in others the two stay
+close; no subcategory shows the factorization improving with order. The most
+natural reading is that each multiplication of the approximate matrix compounds
+its reconstruction error, so the higher-order transition probabilities --- and
+hence the rankings drawn from them --- drift further from the true chain as $k$
+increases. Whether factorization helps or hurts at higher order also varies with
+the subcategory, which suggests the effect depends on the structure of the
+underlying transition graph rather than being a property of the method alone.
+
+Crucially, the earlier comparison still stands over the top of all this. Even
+where the factorized first-order result edges out the raw matrix, it remains below
+the production FBM~v1.5.1 of Table~\ref{tab:mf-ctr-subcat}. An improvement over
+the raw transition matrix is of little value if it does not also clear the
+production baseline, and here it does not.
+
+\subsection{Incorporating a Self-Transition Probability}
+\label{sec:mf-ctr-self}
+
+A final experiment revisits an assumption built into the transition matrix. In
+all of the above, the diagonal of the matrix was zero: a product could never
+transition to itself. This is convenient but ignores a real browsing behaviour
+--- users often linger on a product, revisiting its details, comparing
+specifications, or returning to it after looking at related items, before moving
+on. A non-zero diagonal lets the Markov model represent this.
+
+Concretely, let $M=[m_{ij}]$ be the original row-normalised matrix with
+$m_{ii}=0$ and $\sum_j m_{ij}=1$. A fixed self-transition probability $\alpha$ is
+placed on the diagonal and the off-diagonal mass is rescaled to keep each row
+stochastic:
+\begin{equation}
+  \label{eq:self-transition}
+  m'_{ii} = \alpha,
+  \qquad
+  m'_{ij} = (1-\alpha)\,m_{ij}\ \ (i\neq j),
+  \qquad\text{so that}\quad \sum_{j} m'_{ij} = 1 .
+\end{equation}
+The experiment then sweeps three factors jointly --- the self-transition
+probability $\alpha$, the factorization rank, and the transition exponent --- on
+subcategory~526. Factorization ranks of $1000$, $1500$, and $2000$ are compared
+against recommendations taken directly from the (self-transition-augmented) raw
+matrix. Table~\ref{tab:mf-ctr-self} reports the results.
+
+\begin{table}[ht]
+  \centering
+  \caption{CTR (\%) on subcategory~526 with a self-transition probability
+           $\alpha$, for factorization ranks $1000/1500/2000$ and for the raw
+           matrix (``No fac.''), across transition exponents $k$.}
+  \label{tab:mf-ctr-self}
+  \small
+  \resizebox{\textwidth}{!}{%
+  \begin{tabular}{clcccccccc}
+    \toprule
+    & & \multicolumn{2}{c}{Rank 1000} & \multicolumn{2}{c}{Rank 1500}
+      & \multicolumn{2}{c}{Rank 2000} & \multicolumn{2}{c}{No fac.} \\
+    \cmidrule(lr){3-4}\cmidrule(lr){5-6}\cmidrule(lr){7-8}\cmidrule(lr){9-10}
+    $\alpha$ & $k$ & IM & IMOB & IM & IMOB & IM & IMOB & IM & IMOB \\
+    \midrule
+    \multirow{4}{*}{$0.0625$}
+      & 1 & $13.51$ & $22.67$ & $15.32$ & $27.12$ & $15.74$ & $28.26$ & $15.32$ & $28.32$ \\
+      & 2 & $13.23$ & $20.97$ & $14.76$ & $25.49$ & $16.43$ & $26.30$ & $15.60$ & $26.52$ \\
+      & 3 & $12.26$ & $18.09$ & $13.09$ & $21.56$ & $13.93$ & $22.45$ & $14.21$ & $23.27$ \\
+      & 4 & $10.58$ & $16.31$ & $11.00$ & $17.61$ & $11.56$ & $18.90$ & $11.56$ & $19.69$ \\
+    \midrule
+    \multirow{4}{*}{$0.125$}
+      & 1 & $14.21$ & $24.25$ & $15.18$ & $27.22$ & $16.57$ & $27.95$ & $15.32$ & $28.32$ \\
+      & 2 & $14.90$ & $22.83$ & $15.88$ & $26.75$ & $16.57$ & $27.53$ & $16.30$ & $27.56$ \\
+      & 3 & $12.67$ & $20.06$ & $14.35$ & $23.57$ & $14.62$ & $23.90$ & $14.62$ & $24.44$ \\
+      & 4 & $11.28$ & $17.01$ & $11.56$ & $18.75$ & $12.12$ & $19.64$ & $12.40$ & $21.05$ \\
+    \midrule
+    \multirow{4}{*}{$0.25$}
+      & 1 & $14.76$ & $24.67$ & $15.46$ & $26.58$ & $16.57$ & $27.26$ & $15.32$ & $28.32$ \\
+      & 2 & $15.60$ & $24.33$ & $15.18$ & $26.68$ & $16.85$ & $27.53$ & $16.71$ & $28.44$ \\
+      & 3 & $13.93$ & $22.52$ & $14.35$ & $24.93$ & $15.32$ & $25.80$ & $16.43$ & $26.71$ \\
+      & 4 & $12.26$ & $19.36$ & $13.23$ & $21.47$ & $13.65$ & $22.37$ & $14.48$ & $24.14$ \\
+    \midrule
+    \multirow{4}{*}{$0.5$}
+      & 1 & $14.76$ & $23.97$ & $14.76$ & $24.54$ & $14.76$ & $25.57$ & $15.32$ & $28.32$ \\
+      & 2 & $15.60$ & $24.89$ & $15.18$ & $25.89$ & $15.74$ & $26.66$ & $16.85$ & $28.86$ \\
+      & 3 & $14.90$ & $24.65$ & $14.90$ & $26.02$ & $16.02$ & $26.40$ & $17.55$ & $28.41$ \\
+      & 4 & $13.79$ & $23.44$ & $14.21$ & $25.16$ & $15.46$ & $25.35$ & $16.99$ & $27.63$ \\
+    \bottomrule
+  \end{tabular}%
+  }
+\end{table}
+
+The results are internally sensible but do not change the conclusion. Within the
+factorized models, a higher rank almost always helps: rank~2000 is consistently
+the strongest of the three, as expected, since a larger rank retains more of the
+transition information. Recommendation quality also falls off steadily as the
+exponent grows, for both the factorized and the raw matrix and at every value of
+$\alpha$ --- higher-order powers spread probability mass over ever more products
+and dilute the strong direct transitions that drive good recommendations. The
+value of $\alpha$ trades off how much probability is held at the current product
+against how much flows to its neighbours, and moderate values keep that balance
+best. But across the whole sweep --- every rank, every exponent, every $\alpha$
+--- the raw self-transition matrix remains competitive and, in most cells,
+achieves the highest CTR overall, especially at the larger exponents. Adding a
+self-transition term does not let the factorized representation overcome the
+information it loses to the low-rank approximation.
+
+\subsection{Summary}
+\label{sec:mf-ctr-summary}
+
+The three experiments agree. Non-negative matrix factorization gives a compact,
+computationally cheap way to approximate the transition matrix and its powers,
+but it does not preserve recommendation quality: its first-order recommendations
+trail the raw matrix, its higher-order recommendations accumulate approximation
+error, and a self-transition term does not close the gap. In every setting the
+factorized recommender stays below the production FBM. Because beating the raw
+transition matrix is not enough --- the method has to beat the production
+baseline to be worth deploying --- the factorization approach was not carried
+forward as the final recommender. This empirical shortfall, together with the
+structural limitation examined next, is what motivated the alternative directions
+pursued in the following chapters.
 
 %--------------------------------------------------------------
 \section{Limitation of Weighted NMF}

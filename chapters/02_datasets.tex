@@ -1,0 +1,190 @@
+%==============================================================
+%  Chapter 2 -- Datasets
+%  Source: datasets document (co-author). Rewritten as thesis prose;
+%  the product-embedding construction is deferred to the embedding
+%  chapter, where those vectors are actually consumed.
+%==============================================================
+\chapter{Datasets}
+\label{ch:datasets}
+
+Every method in this thesis is built on data collected from real user activity
+on the IndiaMART platform. This chapter describes that data before any model is
+introduced, so that later chapters can refer back to a single, consistent
+account of what was observed and how it was prepared. Three datasets are used.
+The first is a log of raw browsing interactions; the second is a transition
+dataset derived from those logs, which is the primary training input for the
+sequential models; and the third is a catalogue of product descriptions that
+supplies content information about individual items. The first two capture how
+users behave, while the third describes what the products are.
+
+The interaction log and the transition dataset are complementary views of the
+same activity. The log keeps every interaction event as it happened, whereas
+the transition dataset re-expresses that activity as ordered product-to-product
+movements, which is the form the recommendation models need. The remainder of
+the chapter takes each dataset in turn and then describes the preprocessing
+applied before training.
+
+%--------------------------------------------------------------
+\section{Click Stream Log (CSL) Dataset}
+\label{sec:csl}
+
+The Click Stream Log records the interactions a user generates while browsing
+IndiaMART. These are \emph{implicit} signals: they come from ordinary browsing
+behaviour rather than from ratings or any other feedback a user is asked to
+provide. Implicit feedback of this kind is the norm in large industrial
+recommender systems, where explicit ratings are available for only a small
+fraction of users and cannot be relied upon at scale.
+
+The log contains several kinds of events corresponding to different stages of
+engagement --- among them product impressions, product clicks, and conversion
+events --- so that together they trace a user's path from being shown an item to
+acting on it. Because the data is drawn from genuine browsing sessions, it
+carries the characteristics one expects of a production recommendation setting:
+interactions are sparse relative to the size of the catalogue, user interests
+shift over time, and the product inventory is large and heterogeneous.
+
+Each record is tagged with a user identifier, the browsing platform, a
+timestamp, product information, and other contextual attributes from the
+session. Because events carry timestamps, they can be ordered in time, and it is
+this chronological ordering that makes it possible to reconstruct the sequential
+browsing behaviour from which the transition dataset is built.
+
+%--------------------------------------------------------------
+\section{Transition Dataset}
+\label{sec:transition-data}
+
+The click stream log faithfully records individual interactions, but it does not
+by itself express the sequential relationship between products a user views one
+after another. Since the models in this work are concerned precisely with those
+product-to-product movements, the log is converted during preprocessing into a
+separate \emph{transition dataset}. This dataset is stored on its own and is the
+main source used for training.
+
+Each row of the transition dataset represents one observed transition from a
+source product to a destination product. Alongside the two products, each row
+keeps contextual information --- the browsing platform, the category identifiers
+of both products, a timestamp, and metadata describing the kind of transition.
+Representing the data this way lets a model learn patterns in how users navigate
+between products, rather than treating each interaction as an isolated event.
+
+The timestamp on each transition is retained deliberately, because it is later
+used to split the data into training and test sets chronologically. Keeping the
+temporal order intact prevents information from later interactions leaking into
+the training of a model that is meant to predict them, and it lets the models be
+evaluated under conditions closer to real deployment, where only past behaviour
+is available when a recommendation is made.
+
+\subsection{Schema}
+\label{sec:transition-schema}
+Table~\ref{tab:transition-schema} lists the attributes of the transition
+dataset. Between them, the product identifiers record the sequential movement
+from one item to the next, the category identifiers carry the semantic grouping
+of each product, and the platform field allows behaviour to be compared across
+browsing modes. Taken together these fields give a compact but informative
+description of user navigation suitable for training recommendation models over
+a very large product catalogue.
+
+\begin{table}[ht]
+  \centering
+  \caption{Schema of the transition dataset.}
+  \label{tab:transition-schema}
+  \begin{tabular}{ll}
+    \toprule
+    Attribute & Description \\
+    \midrule
+    \texttt{User\_ID}        & Identifier of the user who generated the transition. \\
+    \texttt{MODID}           & Browsing platform / mode of access (e.g.\ website or mobile). \\
+    \texttt{Timestamp}       & Time of the transition; used for chronological splitting. \\
+    \texttt{ProdID1}         & Source product of the transition. \\
+    \texttt{ProdID2}         & Destination product of the transition. \\
+    \texttt{mcatid1}         & Main-category identifier of the source product. \\
+    \texttt{mcatid2}         & Main-category identifier of the destination product. \\
+    \texttt{subcatid1}       & Sub-category identifier of the source product. \\
+    \texttt{subcatid2}       & Sub-category identifier of the destination product. \\
+    \texttt{Transition\_Type}& Nature of the navigation producing the transition \\
+                             & (e.g.\ product-to-product, or originating from a search source). \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+%--------------------------------------------------------------
+\section{Product Description Dataset}
+\label{sec:product-desc}
+
+In addition to the behavioural data, a product description dataset provides
+catalogue-level information about the products listed on IndiaMART. Unlike the
+click stream log and the transition dataset, which describe what users did, this
+dataset describes the products themselves and their sellers. It is the source of
+product metadata used for content-based signals, feature construction, and
+product representation learning in later chapters.
+
+Each entry corresponds to a single catalogue listing and contains identifiers,
+product information, seller details, category assignments, geographical
+information, and product specifications. These attributes let a model reason
+about products using their semantic properties in addition to how users interact
+with them. The most informative of these attributes is the
+\texttt{custom\_specs\_json} field, which stores product specifications as
+structured JSON. These specifications capture characteristics of a product that
+its categorical identifiers alone do not, and they can be turned into structured
+features or into text for downstream models. Table~\ref{tab:product-schema}
+lists the attributes of the dataset.
+
+\begin{table}[ht]
+  \centering
+  \caption{Schema of the product description dataset.}
+  \label{tab:product-schema}
+  \begin{tabular}{ll}
+    \toprule
+    Attribute & Description \\
+    \midrule
+    \texttt{pc\_item\_display\_id}   & Unique identifier of the catalogue entry. \\
+    \texttt{pc\_item\_name}          & Product name or title. \\
+    \texttt{pc\_item\_img\_small}    & Reference to the product image for the entry. \\
+    \texttt{pc\_item\_glusr\_usr\_id}& Identifier of the seller / catalogue owner. \\
+    \texttt{city\_name}              & Seller's city. \\
+    \texttt{state\_name}             & Seller's state. \\
+    \texttt{fk\_glcat\_mcat\_id}     & Main product-category identifier. \\
+    \texttt{glcat\_cat\_id}          & Product-category identifier. \\
+    \texttt{glcat\_grp\_id}          & Product-group identifier. \\
+    \texttt{prime\_pmcat\_id}        & Primary product category assigned to the entry. \\
+    \texttt{custom\_specs\_json}     & Structured product specifications (attribute--value pairs) \\
+                                     & stored as JSON. \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+The product description dataset complements the behavioural data by describing
+the intrinsic properties of catalogue items rather than user preferences. Where
+the interaction logs reveal what users are drawn to, the catalogue metadata
+records what each product is. Combining the two lets a recommender tell
+genuinely similar products apart, build better item representations, and lean on
+content when interaction data is sparse or a product is newly listed --- the
+cold-start situations that recur throughout this work.
+
+%--------------------------------------------------------------
+\section{Data Preprocessing}
+\label{sec:data-preprocessing}
+
+Before any model is trained, the datasets are cleaned and put into a form the
+learning algorithms can consume. This section covers the cleaning applied to the
+transition dataset. The construction of content-based product vectors from the
+description dataset is a preprocessing step too, but it is described in
+Chapter~\ref{ch:embedding}, next to the embedding model that consumes those
+vectors.
+
+\subsection{Transition Dataset Cleaning}
+\label{sec:transition-cleaning}
+The transition dataset uses two special boundary markers to delimit browsing
+sequences. A transition whose source is $\texttt{ProdID1} = -1$ marks the start
+of a new user sequence, and a transition whose destination is
+$\texttt{ProdID2} = -2$ marks the end of one. These values are artefacts
+introduced when sequences are assembled; they do not correspond to any real
+product on the platform.
+
+Because the models are meant to learn relationships between actual products,
+every row containing one of these boundary tokens is removed before training.
+Keeping them would inject artificial transitions that do not reflect real
+browsing behaviour and would distort the learned product representations. After
+this filtering, the transition dataset contains only genuine
+product-to-product movements, and it is this cleaned dataset that the models in
+the following chapters are trained on.
